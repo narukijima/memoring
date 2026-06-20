@@ -51,10 +51,21 @@ export interface ParsedMessage {
   source_timestamp: string | null;
   cwd: string | null;
   git_branch: string | null;
+  /** Residual non-allowlisted source fields, preserved (encrypted) so a host
+   *  change is not silently discarded (FR-015, §3.2/§5.3). null when none. */
+  extra: Record<string, unknown> | null;
 }
 
 export type ParseResult =
-  | { kind: 'messages'; messages: ParsedMessage[]; skipped: number }
+  | {
+      kind: 'messages';
+      messages: ParsedMessage[];
+      /** Lines intentionally skipped (valid but empty / structural). */
+      skipped: number;
+      /** Genuine JSON parse failures among the chunk's lines (surfaced, never
+       *  silently dropped — FR-013). Raw is preserved in the Undiluted. */
+      parseFailures: number;
+    }
   | { kind: 'quarantine'; reason: string };
 
 export interface Connector {

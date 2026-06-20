@@ -20,6 +20,8 @@ export interface LoopStats {
   captured: number;
   events: number;
   quarantined: number;
+  /** Genuine per-line JSON parse failures surfaced (not silently dropped, FR-013). */
+  parseFailures: number;
   deduped: number;
   classified: number;
   candidates: number;
@@ -42,6 +44,7 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
     captured: 0,
     events: 0,
     quarantined: 0,
+    parseFailures: 0,
     deduped: 0,
     classified: 0,
     candidates: 0,
@@ -73,6 +76,7 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
         const norm = normalizeOccurrence(ctx, source, cap.occurrence, cap.undiluted, connector, now);
         stats.events += norm.events.length;
         stats.quarantined += norm.quarantined;
+        stats.parseFailures += norm.parseFailures;
         stats.deduped += norm.deduped;
         newEvents.push(...norm.events);
       }
@@ -105,6 +109,12 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
       const claim = ctx.store.getClaim(o.claim_id);
       if (claim) indexClaim(ctx, claim);
     } else if (o.status === 'rejected') stats.rejected += 1;
+  }
+
+  if (stats.parseFailures > 0) {
+    // Surface genuine malformed lines (raw is preserved in the Undiluted and can
+    // be reprocessed; never a silent drop — FR-013).
+    log.warn('loop:parse_failures', { count: stats.parseFailures });
   }
 
   ctx.flush();

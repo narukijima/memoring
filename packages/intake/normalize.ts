@@ -16,6 +16,8 @@ export interface NormalizeResult {
   events: MemEvent[];
   quarantined: number;
   skipped: number;
+  /** Genuine per-line JSON parse failures surfaced from the Parser (FR-013). */
+  parseFailures: number;
   deduped: number;
 }
 
@@ -78,7 +80,7 @@ export function normalizeOccurrence(
       created_at: now.toISOString(),
       schema_version: SCHEMA_VERSION.quarantine,
     });
-    return { events: [], quarantined: 1, skipped: 0, deduped: 0 };
+    return { events: [], quarantined: 1, skipped: 0, parseFailures: 0, deduped: 0 };
   }
 
   const srcIdentity = sourceIdentity(ctx.realmKey, source.connector_id, source.source_stable_id);
@@ -107,7 +109,10 @@ export function normalizeOccurrence(
       continue;
     }
 
-    const scan = runSecretScan('', msg.text, now); // event id filled below
+    // Scan the normalized text AND any preserved unknown fields — a secret in an
+    // unknown field is also subject to the event-level Secret Scan (§5.3).
+    const scanInput = msg.extra ? `${msg.text}\n${JSON.stringify(msg.extra)}` : msg.text;
+    const scan = runSecretScan('', scanInput, now); // event id filled below
     const isSecret = scan.secret_detected;
     const scanUsable = scan.secret_scan_passed;
 
@@ -128,6 +133,11 @@ export function normalizeOccurrence(
     if (!isSecret && scanUsable && msg.text) {
       textRef = ctx.objects.put(`${eventId}_text`, Buffer.from(msg.text, 'utf8')).ref;
     }
+    // Preserve unknown fields encrypted (never indexed / egressed) so a host
+    // format change is not silently discarded (FR-015, §5.3).
+    const extraRef = msg.extra
+      ? ctx.objects.put(`${eventId}_extra`, Buffer.from(JSON.stringify(msg.extra), 'utf8')).ref
+      : null;
 
     const event: MemEvent = {
       event_id: eventId,
@@ -144,7 +154,7 @@ export function normalizeOccurrence(
       timestamp_confidence: msg.source_timestamp ? 'source_reported' : 'capture_observed',
       sequence,
       text_ref: textRef,
-      source_extra_ref: null,
+      source_extra_ref: extraRef,
       sensitivity: isSecret ? 'secret' : 'unknown',
       sensitivity_classification_state: isSecret ? 'inferred' : 'candidate',
       context_injected: injected,
@@ -159,5 +169,5 @@ export function normalizeOccurrence(
     created.push(event);
   }
 
-  return { events: created, quarantined: 0, skipped: parsed.skipped, deduped };
+  return { events: created, quarantined: 0, skipped: parsed.skipped, parseFailures: parsed.parseFailures, deduped };
 }

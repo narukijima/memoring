@@ -64,6 +64,42 @@ describe('Claude Code parser golden (G2 / §9.3)', () => {
     expect(result.kind).toBe('quarantine');
   });
 
+  it('surfaces a genuinely malformed line in a mixed chunk instead of dropping it silently (FR-013)', () => {
+    const bytes = Buffer.from(
+      [
+        JSON.stringify({ type: 'user', uuid: 'u1', sessionId: 's', message: { role: 'user', content: 'hello there' } }),
+        'this line is not json at all',
+        JSON.stringify({ type: 'user', uuid: 'u2', sessionId: 's', message: { role: 'user', content: 'second message' } }),
+      ].join('\n'),
+      'utf8',
+    );
+    const result = claudeCodeConnector.parse(dummyRaw, dummyOcc, bytes);
+    expect(result.kind).toBe('messages');
+    if (result.kind !== 'messages') return;
+    expect(result.messages.length).toBe(2);
+    expect(result.parseFailures).toBe(1); // the bad line is counted, not discarded into `skipped`
+    expect(result.skipped).toBe(0);
+  });
+
+  it('preserves unknown source fields for later promotion instead of discarding them (FR-015)', () => {
+    const bytes = Buffer.from(
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u1',
+        sessionId: 's',
+        message: { role: 'user', content: 'hi' },
+        parentUuid: 'p1',
+        version: '9.9.9',
+        brandNewHostField: { a: 1 },
+      }),
+      'utf8',
+    );
+    const result = claudeCodeConnector.parse(dummyRaw, dummyOcc, bytes);
+    expect(result.kind).toBe('messages');
+    if (result.kind !== 'messages') return;
+    expect(result.messages[0]!.extra).toMatchObject({ parentUuid: 'p1', version: '9.9.9', brandNewHostField: { a: 1 } });
+  });
+
   it('reads newline-aligned chunks from a cursor', () => {
     const all = claudeCodeConnector.read(
       {

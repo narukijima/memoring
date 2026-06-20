@@ -119,7 +119,22 @@ function parseLine(raw: string, fallbackSession: string): ParsedMessage | null {
     source_timestamp: line.timestamp ?? null,
     cwd: line.cwd ?? null,
     git_branch: line.gitBranch ?? null,
+    extra: collectExtra(line),
   };
+}
+
+const KNOWN_LINE_FIELDS: ReadonlySet<string> = new Set([
+  'type', 'uuid', 'leafUuid', 'sessionId', 'cwd', 'gitBranch', 'timestamp', 'isMeta', 'summary', 'message',
+]);
+
+/** Preserve non-allowlisted top-level fields so a host format change is not
+ *  silently discarded (FR-015). Returned null when there is nothing extra. */
+function collectExtra(line: RawLine): Record<string, unknown> | null {
+  const extra: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(line as Record<string, unknown>)) {
+    if (!KNOWN_LINE_FIELDS.has(k)) extra[k] = v;
+  }
+  return Object.keys(extra).length > 0 ? extra : null;
 }
 
 export const claudeCodeConnector: Connector = {
@@ -226,10 +241,11 @@ export const claudeCodeConnector: Connector = {
       const parsed = parseLine(line, 'unknown_session');
       if (parsed) messages.push(parsed);
       else {
-        skipped += 1;
-        // Distinguish "valid JSON but no content" from "not JSON at all".
+        // Distinguish "valid JSON but no content" (a structural skip) from "not
+        // JSON at all" (a genuine parse failure that must be surfaced, FR-013).
         try {
           JSON.parse(line);
+          skipped += 1;
         } catch {
           jsonFailures += 1;
         }
@@ -239,6 +255,6 @@ export const claudeCodeConnector: Connector = {
     if (messages.length === 0 && jsonFailures === lines.length) {
       return { kind: 'quarantine', reason: 'no parseable JSONL lines' };
     }
-    return { kind: 'messages', messages, skipped };
+    return { kind: 'messages', messages, skipped, parseFailures: jsonFailures };
   },
 };
