@@ -97,7 +97,7 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
   for (const event of classifiedEvents) indexEvent(ctx, event);
 
   // ── abstract → candidates. ───────────────────────────────────────────────────
-  const abstractResult = abstractEvents(ctx, provider, classifiedEvents, now);
+  const abstractResult = await abstractEvents(ctx, provider, classifiedEvents, now);
   stats.candidates += abstractResult.newCandidates.length;
   stats.merged += abstractResult.merged;
 
