@@ -73,7 +73,7 @@ function hasToolResult(content: unknown): boolean {
   );
 }
 
-function classifyOrigin(line: RawLine): ParsedMessage['origin'] {
+function classifyOrigin(line: RawLine, text: string): ParsedMessage['origin'] {
   switch (line.type) {
     case 'assistant':
       return 'assistant';
@@ -84,6 +84,14 @@ function classifyOrigin(line: RawLine): ParsedMessage['origin'] {
     case 'user':
       if (hasToolResult(line.message?.content)) return 'tool_result';
       if (line.isMeta === true) return 'system';
+      // Host-injected context (CLAUDE.md, environment, tool guidance) is delivered
+      // as a type:'user' line whose content is a <system-reminder> block. It is
+      // host system/config injection (§1.3.2 `system`), NOT a user utterance, and
+      // must never become independent evidence — this closes the host-memory
+      // laundering loop (§4.12 / G8) at the intake boundary. Gate on a leading
+      // marker so a genuine user message that merely quotes the tag is not
+      // over-excluded.
+      if (text.trimStart().startsWith('<system-reminder>')) return 'system';
       return 'user';
     default:
       return 'unknown';
@@ -97,8 +105,8 @@ function parseLine(raw: string, fallbackSession: string): ParsedMessage | null {
   } catch {
     return null;
   }
-  const origin = classifyOrigin(line);
   const text = line.type === 'summary' ? (line.summary ?? '') : extractText(line.message?.content);
+  const origin = classifyOrigin(line, text);
   // Skip empty non-summary structural lines (no usable content) — not a parse error.
   if (!text && origin !== 'host_summary') return null;
   return {

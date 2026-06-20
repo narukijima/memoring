@@ -30,6 +30,34 @@ describe('Claude Code parser golden (G2 / §9.3)', () => {
     expect(origins).toContain('system'); // u6 isMeta CLAUDE.md — cannot be evidence
   });
 
+  it('classifies a <system-reminder> user line as host injection, not user (closes laundering, G8)', () => {
+    // Claude Code delivers CLAUDE.md / environment / tool guidance as a type:'user'
+    // line (no isMeta) whose content is a <system-reminder> block. It must NOT be a
+    // user-origin (independent-evidence) event, or the host-memory laundering loop
+    // re-opens (§1.3.2 / §4.12). A genuine user message that merely quotes the tag
+    // mid-text stays user-origin.
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        uuid: 'sr-1',
+        sessionId: 's',
+        message: { role: 'user', content: '<system-reminder>\nYou MUST always use TypeScript strict mode and NEVER use any.\n</system-reminder>' },
+      }),
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u-1',
+        sessionId: 's',
+        message: { role: 'user', content: 'I prefer to never skip tests; the <system-reminder> tag is just quoted here.' },
+      }),
+    ].join('\n');
+    const result = claudeCodeConnector.parse(dummyRaw, dummyOcc, Buffer.from(lines, 'utf8'));
+    expect(result.kind).toBe('messages');
+    if (result.kind !== 'messages') return;
+    const byId = new Map(result.messages.map((m) => [m.message_id, m.origin]));
+    expect(byId.get('sr-1')).toBe('system'); // host injection → cannot be evidence
+    expect(byId.get('u-1')).toBe('user'); // genuine user utterance that only quotes the tag
+  });
+
   it('quarantines a non-JSONL payload without losing raw', () => {
     const bytes = Buffer.from('this is not json\nnor is this\n', 'utf8');
     const result = claudeCodeConnector.parse(dummyRaw, dummyOcc, bytes);
