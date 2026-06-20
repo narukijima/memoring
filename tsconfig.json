@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "noImplicitOverride": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["packages/core/*"],
+      "@storage/*": ["packages/storage/*"],
+      "@intake/*": ["packages/intake/*"],
+      "@claim/*": ["packages/claim/*"],
+      "@retrieval/*": ["packages/retrieval/*"],
+      "@security/*": ["packages/security/*"],
+      "@integrations/*": ["packages/integrations/*"]
+    }
+  },
+  "include": ["apps", "packages", "tests"],
+  "exclude": ["node_modules", "dist"]
+}

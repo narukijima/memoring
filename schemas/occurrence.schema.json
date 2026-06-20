@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "memoring/occurrence.v1",
+  "title": "Occurrence",
+  "description": "Layer 2 — the record of contact: when / from which source / at which cursor the Undiluted was observed (Detailed Design §1.2). capture is the only 1-to-2 verb.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "occurrence_id",
+    "undiluted_id",
+    "source_id",
+    "connector_id",
+    "connector_version",
+    "parser_hint",
+    "captured_at",
+    "capture_method",
+    "status",
+    "schema_version"
+  ],
+  "properties": {
+    "occurrence_id": { "type": "string", "pattern": "^occ_" },
+    "undiluted_id": { "type": "string", "pattern": "^und_" },
+    "source_id": { "type": "string", "pattern": "^src_" },
+    "connector_id": { "type": "string" },
+    "connector_version": { "type": "string" },
+    "parser_hint": { "type": "string" },
+    "source_path_ref": { "type": ["string", "null"] },
+    "source_cursor": { "type": ["string", "null"] },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "capture_method": { "enum": ["watch", "backfill", "manual"] },
+    "status": { "enum": ["captured", "tombstoned"] },
+    "schema_version": { "const": "occurrence.v1" }
+  }
+}

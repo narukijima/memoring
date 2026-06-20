@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "memoring/event.v1",
+  "title": "Event",
+  "description": "Layer 3 — an observed fact normalized onto a common timeline. event_identity keeps evidence stable across reprocess (Detailed Design §1.3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_identity",
+    "realm_id",
+    "occurrence_ids",
+    "session_id",
+    "event_type",
+    "origin",
+    "created_at",
+    "timestamp_confidence",
+    "sequence",
+    "sensitivity",
+    "sensitivity_classification_state",
+    "context_injected",
+    "parser_version",
+    "status",
+    "schema_version"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "pattern": "^evt_" },
+    "event_identity": {
+      "type": "string",
+      "description": "Immutable opaque HMAC from source/session logical coordinates. Excludes undiluted_id and connector_instance_id."
+    },
+    "realm_id": { "type": "string", "pattern": "^realm_" },
+    "occurrence_ids": { "type": "array", "items": { "type": "string", "pattern": "^occ_" } },
+    "session_id": { "type": "string", "pattern": "^ses_" },
+    "turn_id": { "type": ["string", "null"] },
+    "event_type": { "type": "string" },
+    "role": { "type": ["string", "null"] },
+    "origin": {
+      "enum": [
+        "user",
+        "tool_result",
+        "command_result",
+        "file_diff",
+        "external_artifact",
+        "assistant",
+        "host_summary",
+        "host_memory",
+        "system",
+        "unknown"
+      ]
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source_timestamp": { "type": ["string", "null"] },
+    "timestamp_confidence": { "enum": ["source_reported", "capture_observed"] },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "text_ref": { "type": ["string", "null"] },
+    "source_extra_ref": { "type": ["string", "null"] },
+    "sensitivity": { "enum": ["public", "internal", "confidential", "secret", "unknown"] },
+    "sensitivity_classification_state": {
+      "enum": ["candidate", "inferred", "confirmed", "conflicted", "rejected"]
+    },
+    "context_injected": { "type": "boolean" },
+    "context_pack_digest": { "type": ["string", "null"] },
+    "parser_version": { "type": "string" },
+    "status": { "enum": ["active", "redacted", "deleted"] },
+    "schema_version": { "const": "event.v1" }
+  }
+}

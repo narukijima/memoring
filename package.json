@@ -1,0 +1,37 @@
+{
+  "name": "memoring",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sovereign Memory Loop — local-first, user-controlled AI memory asset (v0).",
+  "type": "module",
+  "license": "UNLICENSED",
+  "bin": {
+    "memoring": "bin/memoring.mjs"
+  },
+  "scripts": {
+    "memoring": "tsx apps/cli/main.ts",
+    "daemon": "tsx apps/daemon/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "smol-toml": "^1.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true,
+    "esbuild@0.28.1": true,
+    "esbuild@0.21.5": true
+  }
+}

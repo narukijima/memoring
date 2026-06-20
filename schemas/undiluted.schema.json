@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "memoring/undiluted.v1",
+  "title": "Undiluted",
+  "description": "Layer 1 — immutable raw bytes before interpretation. The origin point of all reconstruction (Detailed Design §1.1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "undiluted_id",
+    "realm_id",
+    "payload_format",
+    "encrypted_payload_ref",
+    "content_fingerprint",
+    "size_bytes",
+    "compression",
+    "data_key_id",
+    "created_at",
+    "status",
+    "schema_version"
+  ],
+  "properties": {
+    "undiluted_id": { "type": "string", "pattern": "^und_" },
+    "realm_id": { "type": "string", "pattern": "^realm_" },
+    "payload_format": { "type": "string" },
+    "encrypted_payload_ref": {
+      "type": "string",
+      "description": "Opaque object-store ref (AEAD). No semantic name."
+    },
+    "content_fingerprint": {
+      "type": "string",
+      "description": "HMAC keyed on realm_key. Dedup within a Realm; never across Realms."
+    },
+    "size_bytes": { "type": "integer", "minimum": 0 },
+    "compression": { "enum": ["none", "zstd"] },
+    "data_key_id": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["active", "redacted", "deleted"] },
+    "schema_version": { "const": "undiluted.v1" }
+  }
+}

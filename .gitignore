@@ -1,1 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local Memoring replicas / runtime artifacts must never be committed.
+.memoring/
+*.memoring-realm/
+/tmp-realm/
+/.scratch/
+
+# OS noise
 .DS_Store

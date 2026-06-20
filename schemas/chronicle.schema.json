@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "memoring/chronicle.v1",
+  "title": "Chronicle",
+  "description": "Append-only operation log. Lower layers and the index rebuild deterministically from here. sequence is the monotonic intra-Realm order, primary for supersede ordering (Detailed Design §1.7).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "chronicle_id",
+    "realm_id",
+    "sequence",
+    "op_type",
+    "target_ref",
+    "payload_digest",
+    "created_at",
+    "schema_version"
+  ],
+  "properties": {
+    "chronicle_id": { "type": "string", "pattern": "^chr_" },
+    "realm_id": { "type": "string", "pattern": "^realm_" },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "prev_chronicle_id": { "type": ["string", "null"] },
+    "op_type": {
+      "enum": [
+        "capture",
+        "normalize",
+        "classify",
+        "abstract",
+        "consolidate",
+        "scope_confirm",
+        "redact",
+        "delete",
+        "seal",
+        "reindex"
+      ]
+    },
+    "target_ref": { "type": "string" },
+    "payload_digest": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "schema_version": { "const": "chronicle.v1" }
+  }
+}
