@@ -3,7 +3,7 @@
 All notable changes to Memoring — the frozen specification baseline and the v0 implementation
 built against it — are recorded here.
 
-## Unreleased — v0 implementation (branch `feat/v0-mvp`)
+## Unreleased — v0 implementation
 
 - **v0 implemented** against the frozen spec: CLI + local daemon, the four cores
   (intake → storage → loop → egress), all 13 blocking gates satisfied. Single-user, local-first,

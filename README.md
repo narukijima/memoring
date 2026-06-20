@@ -23,6 +23,10 @@ implementation (CLI + local daemon) is built against them and lives in `apps/` a
 v0 is single-user, local-first, source-only (TypeScript run via `tsx`, no build step). The spec
 remains frozen: implementation does not change a structural invariant without an ADR (see `AGENTS.md`).
 
+**Versioning.** Two deliberately distinct markers: `VERSION` (`1.0.0`) is the frozen **spec
+baseline**; `package.json` `version` (`0.1.0`) is the **code release**. They version different
+things and do not need to match.
+
 ## Quick start
 
 Requires Node.js ≥ 20.

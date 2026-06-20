@@ -4,8 +4,9 @@ This repository is a **frozen specification baseline (Spec Baseline v1.0, 2026-0
 an implementation agent, you implement **against** this specification. You do not change a frozen
 invariant without an ADR. The spec is the authority; your job is to realize it, not to redesign it.
 
-No implementation code exists here yet. Building it is the next phase, and it proceeds by the
-Implementation Instructions.
+The v0 implementation now lives here (`apps/`, `packages/`, `tests/`), built against this
+specification. It realizes the spec; it does not redefine it. New work proceeds by the
+Implementation Instructions and must keep the load-bearing invariants below intact.
 
 ## Reading order
 

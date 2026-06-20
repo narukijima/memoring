@@ -1,6 +1,6 @@
 {
   "name": "memoring",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Sovereign Memory Loop — local-first, user-controlled AI memory asset (v0).",
   "type": "module",

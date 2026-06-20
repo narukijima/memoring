@@ -9,5 +9,8 @@ coverage/
 /tmp-realm/
 /.scratch/
 
+# Logs
+*.log
+
 # OS noise
 .DS_Store
