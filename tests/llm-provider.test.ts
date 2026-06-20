@@ -3,7 +3,7 @@ import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { eventIdentity, sessionIdentity, sourceIdentity } from '@intake/identity';
 import { abstractEvents } from '@claim/extractor';
-import { consolidateClaim } from '@claim/consolidation';
+import { consolidateClaim, consolidatePending, statementSimilarity } from '@claim/consolidation';
 import { LlmMemoryProvider, parseCandidates, buildPrompt, type LlmBackend } from '@claim/llm-provider';
 import { OpenAiCompatibleBackend } from '@integrations/llm/openai-compatible';
 import type { AbstractCandidate, AbstractInput, MemoryProvider } from '@claim/provider';
@@ -304,5 +304,40 @@ describe('batched abstraction attributes each candidate to its source event', ()
     expect(provider.calls).toBe(2); // both batches attempted despite the first throwing
     expect(res.failed).toBe(1); // the failure is counted, not swallowed
     expect(res.newCandidates).toHaveLength(1); // the surviving batch's candidate is still recorded
+  });
+});
+
+describe('near-duplicate suppression at consolidation (§1.5)', () => {
+  it('scores near-identical statements high and unrelated ones low', () => {
+    expect(statementSimilarity('Use PostgreSQL as the database', 'Use PostgreSQL as the database.')).toBeGreaterThan(
+      0.92,
+    );
+    expect(statementSimilarity('Use pnpm not npm', 'The deploy runs on Cloudflare Workers')).toBeLessThan(0.3);
+  });
+
+  it('keeps the canonical claim and conflicts the near-duplicate (duplicate_candidate)', async () => {
+    const e1 = putEvent('user', 'turn a', 'internal');
+    const e2 = putEvent('user', 'turn b', 'internal');
+    const provider: MemoryProvider = {
+      id: 'dup',
+      name: 'dup',
+      version: 'dup.v1',
+      egress: 'local',
+      abstract: (inputs) =>
+        inputs.map((_, i) => ({
+          kind: 'decision' as const,
+          // near-identical (period only) → not exact-merged upstream, but >0.92 similar
+          statement: i === 0 ? 'Use PostgreSQL as the project database' : 'Use PostgreSQL as the project database.',
+          confidence: 0.9,
+          mode: 'explicit' as const,
+          sourceIndex: i,
+        })),
+    };
+    const ab = await abstractEvents(realm.ctx, provider, [e1, e2]);
+    expect(ab.newCandidates).toHaveLength(2); // two distinct candidate claims (no exact-merge)
+
+    const outcomes = consolidatePending(realm.ctx);
+    expect(outcomes.map((o) => o.status).sort()).toEqual(['conflicted', 'consolidated']);
+    expect(outcomes.find((o) => o.status === 'conflicted')?.reasons).toContain('duplicate_candidate');
   });
 });

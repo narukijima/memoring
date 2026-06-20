@@ -275,7 +275,7 @@ describe('Open conflicts section (§3.4 not_conflicted_for_request)', () => {
     const ctx = seeded.realm.ctx;
     const decision = consolidatedByKind('decision');
     // The loop would mark this conflicted on counter-evidence; simulate that state.
-    ctx.store.putClaim({ ...decision, status: 'conflicted', conflict_reason: 'duplicate_candidate' });
+    ctx.store.putClaim({ ...decision, status: 'conflicted', conflict_reason: 'counter_evidence' });
 
     const result = buildContext(ctx, { cwd: seeded.projectRoot, outPath: path.join('.memoring', 'context.md') });
     expect(result.kind).toBe('written');
@@ -290,10 +290,23 @@ describe('Open conflicts section (§3.4 not_conflicted_for_request)', () => {
     expect(decisionsSection).not.toContain(decision.claim_id);
   });
 
-  it('fully drops a conflicted claim that also fails another Gate axis (e.g. out of scope)', () => {
+  it('suppresses a near-duplicate (duplicate_candidate) — not even in Open conflicts (§1.5)', () => {
     const ctx = seeded.realm.ctx;
     const decision = consolidatedByKind('decision');
     ctx.store.putClaim({ ...decision, status: 'conflicted', conflict_reason: 'duplicate_candidate' });
+
+    const result = buildContext(ctx, { cwd: seeded.projectRoot, outPath: path.join('.memoring', 'context.md') });
+    expect(result.kind).toBe('written');
+    const doc = fs.readFileSync(path.join(seeded.projectRoot, '.memoring', 'context.md'), 'utf8');
+    // A duplicate is a density-control suppression, not a real contradiction.
+    expect(doc).not.toContain(decision.claim_id);
+    expect(doc.slice(doc.indexOf('## Open conflicts'))).toContain('_None._');
+  });
+
+  it('fully drops a conflicted claim that also fails another Gate axis (e.g. out of scope)', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    ctx.store.putClaim({ ...decision, status: 'conflicted', conflict_reason: 'counter_evidence' });
 
     // Build with an unknown --scope so active_scope_match also fails: the conflicted
     // claim must NOT appear even in Open conflicts (more than one Gate axis fails).

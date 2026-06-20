@@ -139,6 +139,12 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     else dropped += 1;
   }
   for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'conflicted')) {
+    // A near-duplicate (§1.5) is conflicted only to suppress it — it is not a
+    // real contradiction, so it is not surfaced in "Open conflicts" either.
+    if (claim.conflict_reason === 'duplicate_candidate') {
+      dropped += 1;
+      continue;
+    }
     const sc = toScoped(claim);
     const result = gate(toGateItem(ctx, sc), req);
     if (result.failed.length === 1 && result.failed[0] === 'not_conflicted_for_request') {
@@ -249,6 +255,8 @@ function renderMarkdown(
   lines.push(activeLabelNames.length ? `Active scope: ${activeLabelNames.join(', ')}` : '_No active scope labels._');
   lines.push('');
 
+  const maxPerSection = TOKEN_BUDGET_RECIPE.max_items_per_section;
+  const shownClaims: ScopedClaim[] = []; // only what's rendered → drives the Citations map
   const renderSection = (title: string, citationPrefix = true) => {
     const items = bySection.get(title);
     lines.push(`## ${title}`);
@@ -258,9 +266,16 @@ function renderMarkdown(
       lines.push('');
       return;
     }
-    for (const sc of items) {
+    // Density ceiling: items are already ranked (reinforcement desc, recency), so
+    // the top maxPerSection are the strongest; the rest are omitted with a count.
+    const shown = items.slice(0, maxPerSection);
+    shownClaims.push(...shown);
+    for (const sc of shown) {
       const cite = citationPrefix ? ` (${sc.claim.claim_id})` : '';
       lines.push(`- ${sc.statement}${cite}`);
+    }
+    if (items.length > shown.length) {
+      lines.push(`- _… ${items.length - shown.length} more (lower-ranked) omitted to fit the context budget._`);
     }
     lines.push('');
   };
@@ -287,7 +302,7 @@ function renderMarkdown(
   // 10. Citations / Evidence Map — opaque IDs only (clm_/evt_), no transcript paths.
   lines.push('## Citations / Evidence Map');
   lines.push('');
-  const cited = [...passed, ...conflictsOpen];
+  const cited = [...shownClaims, ...conflictsOpen]; // cite only what was rendered, not the capped-out tail
   if (cited.length === 0) lines.push('_No citations._');
   else
     for (const sc of cited) {
