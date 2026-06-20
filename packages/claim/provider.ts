@@ -7,6 +7,8 @@
 // must still pass the same validator/gate — it can never reach `confirmed`.
 import type { ClaimKind } from '@core/schema/enums';
 
+export type MaybePromise<T> = T | Promise<T>;
+
 export interface AbstractInput {
   text: string;
   origin: string;
@@ -25,8 +27,18 @@ export interface MemoryProvider {
   id: string;
   name: string;
   version: string;
-  /** abstract — the leap from Events to Claim candidates. */
-  abstract(inputs: AbstractInput[]): AbstractCandidate[];
+  /** Egress class of this provider's `abstract` call. `local` runs entirely
+   *  on-device (Mode A rule-based / local LLM) and shares the loop's trust
+   *  envelope. `remote` sends raw Event text off-device (Mode C) and MUST be fed
+   *  only events that clear the pre-egress sensitivity gate — the caller enforces
+   *  this (extractor.ts), reusing the output Gate's `allowedSensitivity` so there
+   *  is no second, divergent safety predicate. */
+  egress: 'local' | 'remote';
+  /** abstract — the leap from Events to Claim candidates. May be async (a model
+   *  call); the caller awaits. Batch-capable by signature (`inputs[]`). The
+   *  provider only PROPOSES; authority stays in the validator/Gate (CON-002), so a
+   *  candidate can never self-promote to confirmed. */
+  abstract(inputs: AbstractInput[]): MaybePromise<AbstractCandidate[]>;
 }
 
 interface Pattern {
@@ -55,6 +67,7 @@ export class RuleBasedProvider implements MemoryProvider {
   id = 'rule_based';
   name = 'rule-based (no-AI degraded)';
   version = 'rule_based.v1';
+  egress = 'local' as const; // pure in-process regex; never leaves the device
 
   abstract(inputs: AbstractInput[]): AbstractCandidate[] {
     const out: AbstractCandidate[] = [];

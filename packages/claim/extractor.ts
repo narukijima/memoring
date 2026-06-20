@@ -8,6 +8,7 @@ import { SCHEMA_VERSION } from '@core/schema/versions';
 import { normalizeLabel } from '@core/label-normalize';
 import { hmacHex } from '@security/crypto-primitives';
 import { isIndependentEvidenceOrigin, maxSensitivityOf, type Sensitivity } from '@core/schema/enums';
+import { allowedSensitivity, allowedSensitivityState } from '@core/policy';
 import type { Claim, Derivation, MemEvent } from '@core/schema/entities';
 import type { MemoryProvider } from './provider';
 
@@ -31,11 +32,11 @@ function recordDerivation(ctx: RealmContext, provider: MemoryProvider, event: Me
     derivation_type: 'abstract',
     input_event_identities: [event.event_identity],
     input_claim_ids: [],
-    model_provider: 'local',
+    model_provider: provider.egress, // 'local' | 'remote' — records whether this derivation left the device
     model_name: provider.id,
     model_version: provider.version,
     temperature: null,
-    prompt_version: 'rule_based.v1',
+    prompt_version: provider.version, // rule_based.v1 / llm.v1 — provenance must name the actual prompt
     recipe_id: 'recipe_consolidation_v1',
     validator_version: 'validator.v1',
     output_digest: hmacHex(ctx.realmKey, event.event_identity),
@@ -51,12 +52,12 @@ export interface AbstractResult {
   merged: number;
 }
 
-export function abstractEvents(
+export async function abstractEvents(
   ctx: RealmContext,
   provider: MemoryProvider,
   events: MemEvent[],
   now = new Date(),
-): AbstractResult {
+): Promise<AbstractResult> {
   const newCandidates: Claim[] = [];
   let merged = 0;
 
@@ -66,10 +67,21 @@ export function abstractEvents(
     // context_injected session is still external_observation, hence allowed.
     if (!isIndependentEvidenceOrigin(event.origin)) continue;
     if (event.origin !== 'user') continue; // v0 heuristics target explicit user statements
+    // Pre-egress gate: a `remote` provider sends raw Event text off-device, which
+    // the output Gate never sees. Forward only events that clear the SAME
+    // sensitivity predicate the Gate uses for remote_ai_processing — so secret /
+    // unknown / unconfirmed-confidential text is never exfiltrated to a model.
+    if (
+      provider.egress === 'remote' &&
+      (!allowedSensitivity(event.sensitivity, 'remote_ai_processing', 'standard') ||
+        !allowedSensitivityState(event.sensitivity_classification_state, 'remote_ai_processing', 'standard'))
+    ) {
+      continue; // mirror the output Gate exactly — value AND determination-state
+    }
     const text = readText(ctx, event);
     if (!text) continue;
 
-    const candidates = provider.abstract([{ text, origin: event.origin, role: event.role }]);
+    const candidates = await provider.abstract([{ text, origin: event.origin, role: event.role }]);
     if (candidates.length === 0) continue;
 
     const assignmentIds = ctx.store
@@ -120,7 +132,12 @@ export function abstractEvents(
         conflict_reason: null,
         evidence_event_identities: [event.event_identity],
         evidence_occurrence_ids: [...event.occurrence_ids],
-        created_by: 'rule',
+        // Provenance drives the validator's evidence bar (validator.ts): an
+        // `inferred` candidate (default for LLM-derived patterns) is held to
+        // ai_inferred_pattern (min_evidence=2, τ=0.85) and cannot consolidate from
+        // a single event; an `explicit` user statement keeps the explicit bar.
+        // RuleBasedProvider always emits explicit, so Mode A is unchanged.
+        created_by: cand.mode === 'inferred' ? 'ai' : 'rule',
         created_by_derivation_id: derivation.derivation_id,
         created_at: now.toISOString(),
         last_recalled_at: null,
