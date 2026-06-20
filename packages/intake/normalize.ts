@@ -87,6 +87,16 @@ export function normalizeOccurrence(
   const created: MemEvent[] = [];
   let deduped = 0;
 
+  // Determine context_injected per session up front (batch-global), so EVERY event
+  // of a marker-tripped session inherits it regardless of message order within the
+  // batch (§1.3 "session-level provenance" / §3.4 whole-session over-exclusion).
+  const injectedBySession = new Set<string>();
+  for (const msg of parsed.messages) {
+    if (textLooksContextInjected(msg.text)) {
+      injectedBySession.add(sessionIdentity(ctx.realmKey, srcIdentity, msg.host_session_stable_id));
+    }
+  }
+
   for (const msg of parsed.messages) {
     const sesIdentity = sessionIdentity(ctx.realmKey, srcIdentity, msg.host_session_stable_id);
     const session = getOrCreateSession(ctx, source, sesIdentity, connector.displayName, now);
@@ -118,7 +128,7 @@ export function normalizeOccurrence(
 
     // context_injected provenance: a marker anywhere in the session falls the
     // whole session to the safe side (over-exclusion; span-level is v0.1).
-    const injected = textLooksContextInjected(msg.text) || session.context_injected;
+    const injected = injectedBySession.has(sesIdentity) || session.context_injected;
     if (injected && !session.context_injected) {
       session.context_injected = true;
       ctx.store.putSession(session);
