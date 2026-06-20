@@ -326,6 +326,16 @@ export function writeContextFileSafely(outPath: string, content: string, cwd: st
   ensureDir(targetDir, 0o700);
   atomicWriteFile(resolvedOut, content, 0o600);
 
+  // NFR-034: the output destination must not be world-readable. We write 0600,
+  // but some filesystems silently ignore chmod — warn if the guarantee did not
+  // hold rather than assume it did.
+  try {
+    const mode = fs.statSync(resolvedOut).mode & 0o777;
+    if (mode & 0o077) log.warn('context:out_world_accessible', { mode: mode.toString(8) });
+  } catch {
+    /* best-effort */
+  }
+
   // Add .memoring/ to .git/info/exclude (never rewrite .gitignore).
   try {
     addToGitExclude(realCwd);

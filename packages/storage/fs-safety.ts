@@ -19,9 +19,19 @@ export function atomicWriteFile(filePath: string, data: Buffer | string, mode = 
 }
 
 export function ensureDir(dir: string, mode = 0o700): void {
-  fs.mkdirSync(dir, { recursive: true });
+  const firstCreated = fs.mkdirSync(dir, { recursive: true });
   try {
-    fs.chmodSync(dir, mode);
+    // chmod the leaf plus every intermediate that was newly created (from the
+    // first created ancestor down), so nested paths are not left at the umask
+    // default (e.g. 0755) — only the leaf was chmod'd before.
+    let cur = dir;
+    for (;;) {
+      fs.chmodSync(cur, mode);
+      if (!firstCreated || cur === firstCreated) break;
+      const parent = path.dirname(cur);
+      if (parent === cur) break;
+      cur = parent;
+    }
   } catch {
     /* best-effort */
   }
