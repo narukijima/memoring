@@ -21,6 +21,10 @@ export interface AbstractCandidate {
   confidence: number;
   /** explicit user statement vs merely inferred pattern (Detailed Design §10.1). */
   mode: 'explicit' | 'inferred';
+  /** Index into the `inputs` array this candidate was derived from. Lets the
+   *  caller attribute evidence correctly when a batch of events is abstracted in
+   *  one call (e.g. one LLM round-trip over many turns). */
+  sourceIndex: number;
 }
 
 export interface MemoryProvider {
@@ -71,8 +75,8 @@ export class RuleBasedProvider implements MemoryProvider {
 
   abstract(inputs: AbstractInput[]): AbstractCandidate[] {
     const out: AbstractCandidate[] = [];
-    for (const input of inputs) {
-      const text = input.text;
+    for (let i = 0; i < inputs.length; i++) {
+      const text = inputs[i]!.text;
       if (!text || text.length < 8) continue;
       for (const p of PATTERNS) {
         if (p.re.test(text)) {
@@ -81,6 +85,7 @@ export class RuleBasedProvider implements MemoryProvider {
             statement: firstSentence(text),
             confidence: 0.85, // explicit user statement → meets τ_conf for explicit kinds
             mode: 'explicit',
+            sourceIndex: i,
           });
           break; // one candidate per event in v0
         }

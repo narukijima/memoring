@@ -84,11 +84,16 @@ class FixedProvider implements MemoryProvider {
 }
 
 describe('LLM provider response parsing', () => {
-  it('parses a bare JSON array of candidates', () => {
+  it('parses a bare JSON array of candidates (source omitted → index 0)', () => {
     const out = parseCandidates(
       '[{"kind":"preference","statement":"use tabs","confidence":0.9,"mode":"explicit"}]',
     );
-    expect(out).toEqual([{ kind: 'preference', statement: 'use tabs', confidence: 0.9, mode: 'explicit' }]);
+    expect(out).toEqual([{ kind: 'preference', statement: 'use tabs', confidence: 0.9, mode: 'explicit', sourceIndex: 0 }]);
+  });
+
+  it('maps the 1-based [#N] source turn to a 0-based sourceIndex', () => {
+    const out = parseCandidates('[{"kind":"fact","statement":"repo is TS","source":3}]');
+    expect(out[0]!.sourceIndex).toBe(2);
   });
 
   it('tolerates ```json code fences and a {candidates:[...]} wrapper', () => {
@@ -103,7 +108,7 @@ describe('LLM provider response parsing', () => {
     const out = parseCandidates(
       '[{"kind":"vibe","statement":"x"},{"kind":"fact","statement":""},{"kind":"fact","statement":"repo is TS","confidence":5}]',
     );
-    expect(out).toEqual([{ kind: 'fact', statement: 'repo is TS', confidence: 1, mode: 'inferred' }]);
+    expect(out).toEqual([{ kind: 'fact', statement: 'repo is TS', confidence: 1, mode: 'inferred', sourceIndex: 0 }]);
     expect(parseCandidates('not json at all')).toEqual([]);
   });
 
@@ -125,7 +130,7 @@ describe('LLM provider response parsing', () => {
     expect(provider.egress).toBe('remote');
     expect(provider.id).toBe('llm:mock:m1');
     const out = await provider.abstract([{ text: 'we will use pnpm', origin: 'user', role: 'user' }]);
-    expect(out).toEqual([{ kind: 'decision', statement: 'adopt pnpm', confidence: 0.8, mode: 'explicit' }]);
+    expect(out).toEqual([{ kind: 'decision', statement: 'adopt pnpm', confidence: 0.8, mode: 'explicit', sourceIndex: 0 }]);
   });
 });
 
@@ -207,6 +212,7 @@ describe('provider mode drives the validator evidence bar', () => {
       statement: 'use tabs',
       confidence: 0.9,
       mode: 'inferred',
+      sourceIndex: 0,
     });
     const res = await abstractEvents(realm.ctx, provider, [ev]);
     expect(res.newCandidates).toHaveLength(1);
@@ -223,9 +229,50 @@ describe('provider mode drives the validator evidence bar', () => {
       statement: 'always run the linter',
       confidence: 0.9,
       mode: 'explicit',
+      sourceIndex: 0,
     });
     const res = await abstractEvents(realm.ctx, provider, [ev]);
     expect(res.newCandidates[0]!.created_by).toBe('rule'); // explicit → rule → explicit bar (Mode A unchanged)
     expect(consolidateClaim(realm.ctx, res.newCandidates[0]!).status).toBe('consolidated');
+  });
+});
+
+describe('batched abstraction attributes each candidate to its source event', () => {
+  it('sends events in one call and maps candidates back via sourceIndex', async () => {
+    const e0 = putEvent('user', 'first turn', 'internal');
+    const e1 = putEvent('user', 'second turn', 'internal');
+    const e2 = putEvent('user', 'third turn', 'internal');
+    const provider: MemoryProvider = {
+      id: 'batch',
+      name: 'batch',
+      version: 'batch.v1',
+      egress: 'local',
+      abstract: (inputs) => {
+        expect(inputs).toHaveLength(3); // all three sent in ONE call (batched, not per-event)
+        return [
+          { kind: 'decision', statement: 'from second', confidence: 0.9, mode: 'explicit', sourceIndex: 1 },
+          { kind: 'fact', statement: 'from third', confidence: 0.9, mode: 'explicit', sourceIndex: 2 },
+        ];
+      },
+    };
+    const res = await abstractEvents(realm.ctx, provider, [e0, e1, e2]);
+    expect(res.newCandidates).toHaveLength(2);
+    const dec = res.newCandidates.find((c) => c.kind === 'decision')!;
+    const fact = res.newCandidates.find((c) => c.kind === 'fact')!;
+    expect(dec.evidence_event_identities).toEqual([e1.event_identity]); // turn #2 → e1
+    expect(fact.evidence_event_identities).toEqual([e2.event_identity]); // turn #3 → e2
+  });
+
+  it('drops a candidate that cites an out-of-range turn (cannot attribute evidence)', async () => {
+    const e0 = putEvent('user', 'only turn', 'internal');
+    const provider: MemoryProvider = {
+      id: 'oob',
+      name: 'oob',
+      version: 'oob.v1',
+      egress: 'local',
+      abstract: () => [{ kind: 'fact', statement: 'ghost', confidence: 0.9, mode: 'explicit', sourceIndex: 5 }],
+    };
+    const res = await abstractEvents(realm.ctx, provider, [e0]);
+    expect(res.newCandidates).toHaveLength(0);
   });
 });

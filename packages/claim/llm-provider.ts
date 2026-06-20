@@ -28,7 +28,8 @@ const EXTRACTION_INSTRUCTION = [
   '{"kind": one of ["preference","constraint","decision","fact","project_context","procedure"],',
   ' "statement": a concise, self-contained restatement (<= 280 chars),',
   ' "confidence": number 0..1,',
-  ' "mode": "explicit" if the user stated it directly, else "inferred"}.',
+  ' "mode": "explicit" if the user stated it directly, else "inferred",',
+  ' "source": the [#N] turn number this memory came from}.',
   'Keep ONLY memories that stay useful in a FUTURE, unrelated session: standing user',
   'preferences, hard constraints, settled decisions, stable project facts, reusable procedures.',
   'Do NOT keep: ephemeral or one-off task instructions, pasted role/mission/agent prompts,',
@@ -71,11 +72,16 @@ export function parseCandidates(raw: string): AbstractCandidate[] {
     const statement = typeof o.statement === 'string' ? o.statement.trim() : '';
     if (typeof o.kind !== 'string' || !kinds.has(o.kind) || statement.length === 0) continue;
     const confidence = Math.min(1, Math.max(0, typeof o.confidence === 'number' ? o.confidence : 0.7));
+    // The model cites a 1-based [#N] turn; convert to a 0-based input index.
+    // Missing/invalid → 0 (the caller drops it if out of range for the batch).
+    const sourceIndex =
+      typeof o.source === 'number' && Number.isFinite(o.source) ? Math.max(0, Math.floor(o.source) - 1) : 0;
     out.push({
       kind: o.kind as ClaimKind,
       statement: statement.slice(0, 280),
       mode: o.mode === 'explicit' ? 'explicit' : 'inferred',
       confidence,
+      sourceIndex,
     });
   }
   return out;
