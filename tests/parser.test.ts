@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { claudeCodeConnector } from '@integrations/claude-code/index';
+import { claudeCodeConnector, normalizeProjectRoot } from '@integrations/claude-code/index';
 import type { Occurrence, Undiluted } from '@core/schema/entities';
 
 const fixture = fileURLToPath(
@@ -55,6 +55,49 @@ describe('Claude Code parser golden (G2 / §9.3)', () => {
     const byId = new Map(result.messages.map((m) => [m.message_id, m.origin]));
     expect(byId.get('sr-1')).toBe('system'); // host injection → cannot be evidence
     expect(byId.get('u-1')).toBe('user'); // genuine user utterance that only quotes the tag
+  });
+
+  it('classifies a <task-notification> user line as host injection, not user (closes laundering, G8)', () => {
+    // The harness injects background-task completion events as a type:'user' line
+    // (no isMeta) whose content leads with a <task-notification> block. Like
+    // <system-reminder>, it is host system injection (§1.3.2 `system`) and must NOT
+    // become independent evidence, or the laundering loop re-opens — these blocks
+    // otherwise mis-map to origin='user' and consolidate as bogus `constraint`s.
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        uuid: 'tn-1',
+        sessionId: 's',
+        message: {
+          role: 'user',
+          content:
+            '<task-notification>\n<task-id>abc123</task-id>\n<status>completed</status>\n<summary>You must always finish the build.</summary>\n</task-notification>',
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u-2',
+        sessionId: 's',
+        message: { role: 'user', content: 'Please summarize the <task-notification> output for me.' },
+      }),
+    ].join('\n');
+    const result = claudeCodeConnector.parse(dummyRaw, dummyOcc, Buffer.from(lines, 'utf8'));
+    expect(result.kind).toBe('messages');
+    if (result.kind !== 'messages') return;
+    const byId = new Map(result.messages.map((m) => [m.message_id, m.origin]));
+    expect(byId.get('tn-1')).toBe('system'); // host-injected task event → cannot be evidence
+    expect(byId.get('u-2')).toBe('user'); // genuine user utterance that only quotes the tag
+  });
+
+  it('attributes a git-worktree cwd to its parent repo (no transient worktree-name projects)', () => {
+    // Claude Code worktrees live at <repo>/.claude/worktrees/<generated-name>; the
+    // throwaway name must not register as its own project. The parent repo is also
+    // the correct root_path for Active-Realm scope matching.
+    expect(normalizeProjectRoot('/Users/x/Documents/reikabu/.claude/worktrees/upbeat-chatterjee-064399')).toBe(
+      '/Users/x/Documents/reikabu',
+    );
+    expect(normalizeProjectRoot('/Users/x/Documents/reikabu')).toBe('/Users/x/Documents/reikabu'); // real root unchanged
+    expect(normalizeProjectRoot(null)).toBe(null);
   });
 
   it('quarantines a non-JSONL payload without losing raw', () => {
