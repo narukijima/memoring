@@ -98,7 +98,7 @@ function classifyOrigin(line: RawLine, text: string): ParsedMessage['origin'] {
   }
 }
 
-function parseLine(raw: string, fallbackSession: string): ParsedMessage | null {
+function parseLine(raw: string, fallbackSession: string, sourcePosition: string | null): ParsedMessage | null {
   let line: RawLine;
   try {
     line = JSON.parse(raw) as RawLine;
@@ -111,6 +111,7 @@ function parseLine(raw: string, fallbackSession: string): ParsedMessage | null {
   if (!text && origin !== 'host_summary') return null;
   return {
     message_id: line.uuid ?? line.leafUuid ?? null,
+    source_position: sourcePosition,
     host_session_stable_id: line.sessionId ?? fallbackSession,
     origin,
     role: line.message?.role ?? null,
@@ -230,15 +231,21 @@ export const claudeCodeConnector: Connector = {
     ];
   },
 
-  parse(_raw: Undiluted, _occurrence: Occurrence, rawBytes: Buffer): ParseResult {
+  parse(_raw: Undiluted, occurrence: Occurrence, rawBytes: Buffer): ParseResult {
     const text = rawBytes.toString('utf8');
-    const lines = text.split('\n').filter((l) => l.trim().length > 0);
+    const rawLines = text.split('\n');
+    const lines = rawLines.filter((l) => l.trim().length > 0);
     if (lines.length === 0) return { kind: 'quarantine', reason: 'empty payload' };
     const messages: ParsedMessage[] = [];
     let skipped = 0;
     let jsonFailures = 0;
-    for (const line of lines) {
-      const parsed = parseLine(line, 'unknown_session');
+    const endCursor = occurrence.source_cursor ? Number(occurrence.source_cursor) : NaN;
+    let offset = Number.isFinite(endCursor) ? endCursor - rawBytes.length : 0;
+    for (const line of rawLines) {
+      const sourcePosition = String(offset);
+      offset += Buffer.byteLength(line) + 1;
+      if (line.trim().length === 0) continue;
+      const parsed = parseLine(line, 'unknown_session', sourcePosition);
       if (parsed) messages.push(parsed);
       else {
         // Distinguish "valid JSON but no content" (a structural skip) from "not

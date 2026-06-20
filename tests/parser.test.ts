@@ -99,6 +99,19 @@ describe('Claude Code parser golden (G2 / §9.3)', () => {
     expect(result.messages[0]!.extra).toMatchObject({ parentUuid: 'p1', version: '9.9.9', brandNewHostField: { a: 1 } });
   });
 
+  it('attaches stable source positions to id-less append lines', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', sessionId: 's', message: { role: 'user', content: 'repeat me' } }),
+      JSON.stringify({ type: 'user', sessionId: 's', message: { role: 'user', content: 'repeat me' } }),
+    ];
+    const bytes = Buffer.from(`${lines.join('\n')}\n`, 'utf8');
+    const occurrence = { source_cursor: String(100 + bytes.length) } as Occurrence;
+    const result = claudeCodeConnector.parse(dummyRaw, occurrence, bytes);
+    expect(result.kind).toBe('messages');
+    if (result.kind !== 'messages') return;
+    expect(result.messages.map((m) => m.source_position)).toEqual(['100', String(101 + Buffer.byteLength(lines[0]!))]);
+  });
+
   it('reads newline-aligned chunks from a cursor', () => {
     const all = claudeCodeConnector.read(
       {

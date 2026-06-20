@@ -198,6 +198,13 @@ export class Store {
   listEventsForOccurrence(realmId: string, occurrenceId: string): MemEvent[] {
     return this.listEvents(realmId).filter((e) => e.occurrence_ids.includes(occurrenceId));
   }
+  listActiveEventsForSession(realmId: string, sessionId: string): MemEvent[] {
+    return this.parseDocs<MemEvent>(
+      this.db
+        .prepare("SELECT doc FROM event WHERE realm_id = ? AND session_id = ? AND status = 'active'")
+        .all(realmId, sessionId) as { doc: string }[],
+    );
+  }
 
   // ── event / secret scan ────────────────────────────────────────────────────
   putEvent(e: MemEvent): void {

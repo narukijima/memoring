@@ -25,7 +25,12 @@ export function eventIdentity(
   sesIdentity: string,
   messageId: string | null,
   text: string,
+  sourcePosition: string | null = null,
 ): string {
-  const anchor = messageId ? `mid:${messageId}` : `anchor:${createHash('sha256').update(text).digest('hex')}`;
+  const anchor = messageId
+    ? `mid:${messageId}`
+    : sourcePosition
+      ? `pos:${sourcePosition}`
+      : `anchor:${createHash('sha256').update(text).digest('hex')}`;
   return realmHmac(realmKey, srcIdentity, sesIdentity, anchor);
 }

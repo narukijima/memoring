@@ -100,7 +100,14 @@ export function normalizeOccurrence(
   for (const msg of parsed.messages) {
     const sesIdentity = sessionIdentity(ctx.realmKey, srcIdentity, msg.host_session_stable_id);
     const session = getOrCreateSession(ctx, source, sesIdentity, connector.displayName, now);
-    const evIdentity = eventIdentity(ctx.realmKey, srcIdentity, sesIdentity, msg.message_id, msg.text);
+    const evIdentity = eventIdentity(
+      ctx.realmKey,
+      srcIdentity,
+      sesIdentity,
+      msg.message_id,
+      msg.text,
+      msg.source_position,
+    );
 
     if (ctx.store.findEventByIdentity(ctx.realmId, evIdentity)) {
       deduped += 1; // idempotent reprocess / overlap
@@ -132,6 +139,9 @@ export function normalizeOccurrence(
     if (injected && !session.context_injected) {
       session.context_injected = true;
       ctx.store.putSession(session);
+      for (const ev of ctx.store.listActiveEventsForSession(ctx.realmId, session.session_id)) {
+        if (!ev.context_injected) ctx.store.putEvent({ ...ev, context_injected: true });
+      }
     }
 
     const sequence = ctx.chronicler.nextSequence();

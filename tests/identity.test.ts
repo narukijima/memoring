@@ -23,6 +23,13 @@ describe('event_identity stability (G11 / CON-012)', () => {
     expect(c).not.toBe(a);
   });
 
+  it('uses source position before text hash when an append source has no message_id', () => {
+    const a = eventIdentity(realmKey, src, ses, null, 'same content', 'offset:10');
+    const b = eventIdentity(realmKey, src, ses, null, 'same content', 'offset:20');
+    expect(a).not.toBe(b);
+    expect(eventIdentity(realmKey, src, ses, null, 'changed text', 'offset:10')).toBe(a);
+  });
+
   it('does not collide across Realms (keyed by realm_key)', () => {
     const a = eventIdentity(realmKey, src, ses, 'msg-1', 't');
     const srcOther = sourceIdentity(otherKey, 'claude_code', 'session-uuid-1');

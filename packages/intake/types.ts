@@ -43,6 +43,8 @@ export interface OccurrenceInput {
 export interface ParsedMessage {
   /** Stable message id from the source if present (else null → content_anchor). */
   message_id: string | null;
+  /** Stable source cursor/offset when no message id exists (append-source fallback). */
+  source_position: string | null;
   host_session_stable_id: string;
   origin: Origin;
   role: string | null;
