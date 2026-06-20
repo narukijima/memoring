@@ -1,0 +1,127 @@
+// Reactive governance — destructive operations (FR-064..073, gate 10). The user
+// governs after the fact; these are the only irreversible operations and require
+// explicit confirmation (Specification §8.2).
+import { replicaLayout } from '@core/paths';
+import { openRealm, type RealmContext } from '@core/runtime';
+import {
+  deleteUndiluted,
+  forgetByPattern,
+  forgetClaim,
+  redactEventById,
+  releaseSealRule,
+} from '@security/redaction';
+import { ask, getPassphrase } from '../prompt';
+import { parseFlags, type Flags } from '../args';
+
+async function confirm(flags: Flags, what: string): Promise<boolean> {
+  if (flags.yes === true) return true;
+  if (process.env.MEMORING_PASSPHRASE) {
+    console.error(`Refusing destructive op without --yes (headless): ${what}`);
+    return false;
+  }
+  const a = await ask(`  This is irreversible: ${what}. Type 'yes' to proceed: `);
+  return a.trim() === 'yes';
+}
+
+async function withRealm<T>(fn: (ctx: RealmContext) => T): Promise<T> {
+  const passphrase = await getPassphrase();
+  const ctx = openRealm(passphrase, replicaLayout().root);
+  try {
+    const r = fn(ctx);
+    ctx.flush();
+    return r;
+  } finally {
+    ctx.close(true);
+  }
+}
+
+export async function cmdForget(argv: string[]): Promise<number> {
+  const flags = parseFlags(argv);
+  if (typeof flags.pattern === 'string') {
+    if (!(await confirm(flags, `forget all claims matching /${flags.pattern}/`))) return 1;
+    const n = await withRealm((ctx) => forgetByPattern(ctx, flags.pattern as string));
+    console.log(`  Forgot ${n} claim(s) and sealed the pattern.`);
+    return 0;
+  }
+  const id = flags._[0];
+  if (!id) {
+    console.error('Usage: memoring forget <claim_id|event_id|undiluted_id> | --pattern <regex>');
+    return 1;
+  }
+  if (!(await confirm(flags, `forget ${id}`))) return 1;
+  const ok = await withRealm((ctx) => {
+    if (id.startsWith('clm_')) return forgetClaim(ctx, id, { seal: true });
+    if (id.startsWith('evt_')) return redactEventById(ctx, id, { seal: true });
+    if (id.startsWith('und_')) return deleteUndiluted(ctx, id, { seal: true }).events >= 0;
+    return false;
+  });
+  console.log(ok ? `  Forgot ${id} (sealed).` : `  Not found: ${id}`);
+  return ok ? 0 : 1;
+}
+
+export async function cmdDelete(argv: string[]): Promise<number> {
+  const flags = parseFlags(argv);
+  const id = flags._[0];
+  if (!id) {
+    console.error('Usage: memoring delete <undiluted_id|event_id|claim_id>');
+    return 1;
+  }
+  if (!(await confirm(flags, `delete ${id} and cascade`))) return 1;
+  const ok = await withRealm((ctx) => {
+    if (id.startsWith('und_')) return deleteUndiluted(ctx, id, { seal: false }).events >= 0;
+    if (id.startsWith('evt_')) return redactEventById(ctx, id, { seal: false });
+    if (id.startsWith('clm_')) return forgetClaim(ctx, id, { seal: false });
+    return false;
+  });
+  console.log(ok ? `  Deleted ${id} (cascaded).` : `  Not found: ${id}`);
+  return ok ? 0 : 1;
+}
+
+export async function cmdRedact(argv: string[]): Promise<number> {
+  const flags = parseFlags(argv);
+  const id = flags._[0];
+  if (!id) {
+    console.error('Usage: memoring redact <event_id|claim_id>');
+    return 1;
+  }
+  if (!(await confirm(flags, `redact ${id}`))) return 1;
+  const ok = await withRealm((ctx) => {
+    if (id.startsWith('evt_')) return redactEventById(ctx, id, { seal: false });
+    if (id.startsWith('clm_')) return forgetClaim(ctx, id, { seal: false });
+    return false;
+  });
+  console.log(ok ? `  Redacted ${id}.` : `  Not found: ${id}`);
+  return ok ? 0 : 1;
+}
+
+export async function cmdSuppress(argv: string[]): Promise<number> {
+  const flags = parseFlags(argv);
+  const sub = flags._[0];
+  const passphrase = await getPassphrase();
+  const ctx = openRealm(passphrase, replicaLayout().root);
+  try {
+    if (sub === 'list') {
+      const rules = ctx.store.listSealRules(ctx.realmId);
+      if (rules.length === 0) console.log('  No SealRules.');
+      for (const r of rules) {
+        console.log(`  ${r.suppression_id} [${r.match_type}] active=${r.active} created_at=${r.created_at}`);
+      }
+      return 0;
+    }
+    if (sub === 'remove') {
+      const id = flags._[1];
+      if (!id) {
+        console.error('Usage: memoring suppress remove <suppression_id>');
+        return 1;
+      }
+      const ok = releaseSealRule(ctx, id);
+      ctx.flush();
+      console.log(ok ? `  Released ${id}.` : `  Not found: ${id}`);
+      return ok ? 0 : 1;
+    }
+    console.error('Usage: memoring suppress list | remove <id>');
+    return 1;
+  } finally {
+    ctx.close(true);
+  }
+}

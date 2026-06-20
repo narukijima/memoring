@@ -1,0 +1,100 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import path from 'node:path';
+import fs from 'node:fs';
+import { deleteUndiluted, forgetClaim, redactEventById, releaseSealRule } from '@security/redaction';
+import { validateClaim } from '@claim/validator';
+import { readClaimStatement } from '@claim/extractor';
+import { searchRealm } from '@retrieval/search';
+import { buildContext } from '@retrieval/context-pack';
+import type { Claim } from '@core/schema/entities';
+import { seedRealmFromFixture, type SeededRealm } from './seed';
+
+let seeded: SeededRealm;
+beforeEach(async () => {
+  seeded = await seedRealmFromFixture();
+});
+afterEach(() => seeded.restore());
+
+function consolidatedByKind(kind: string): Claim {
+  const ctx = seeded.realm.ctx;
+  const c = ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated').find((x) => x.kind === kind);
+  if (!c) throw new Error(`no consolidated ${kind} claim`);
+  return c;
+}
+
+describe('forget / Seal durability (G10 / §4.15)', () => {
+  it('forgetClaim redacts the claim and creates SealRules', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    expect(forgetClaim(ctx, decision.claim_id, { seal: true })).toBe(true);
+
+    expect(ctx.store.getClaim(decision.claim_id)?.status).toBe('redacted');
+    const rules = ctx.store.listSealRules(ctx.realmId);
+    expect(rules.some((r) => r.match_type === 'content_signature')).toBe(true);
+    expect(rules.some((r) => r.match_type === 'event_identity')).toBe(true);
+  });
+
+  it('a Sealed claim cannot re-consolidate (suppression check rejects it)', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    const statement = readClaimStatement(ctx, decision);
+    forgetClaim(ctx, decision.claim_id, { seal: true });
+
+    // A fresh candidate with identical content + evidence must be rejected.
+    const fresh: Claim = { ...decision, claim_id: 'clm_fresh', status: 'candidate' };
+    expect(validateClaim(ctx, fresh, statement).decision).toBe('rejected');
+  });
+
+  it('releasing the SealRule lets the same content validate again (user-only)', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    const statement = readClaimStatement(ctx, decision);
+    forgetClaim(ctx, decision.claim_id, { seal: true });
+    for (const r of ctx.store.listSealRules(ctx.realmId)) releaseSealRule(ctx, r.suppression_id);
+
+    const fresh: Claim = { ...decision, claim_id: 'clm_fresh2', status: 'candidate' };
+    expect(validateClaim(ctx, fresh, statement).decision).toBe('consolidated');
+  });
+
+  it('forgotten claims never appear in a later context build', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    forgetClaim(ctx, decision.claim_id, { seal: true });
+    const out = path.join(seeded.projectRoot, '.memoring', 'context.md');
+    const result = buildContext(ctx, { cwd: seeded.projectRoot, outPath: path.join('.memoring', 'context.md') });
+    expect(result.kind).toBe('written');
+    const doc = fs.readFileSync(out, 'utf8');
+    expect(doc).not.toContain('better-sqlite3');
+  });
+});
+
+describe('delete / redact cascade (G10 / §7.3)', () => {
+  it('redacting an evidence event cascades the dependent claim to redacted', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    const evId = decision.evidence_event_identities[0]!;
+    const event = ctx.store.findEventByIdentity(ctx.realmId, evId)!;
+
+    expect(redactEventById(ctx, event.event_id, { seal: false })).toBe(true);
+    expect(ctx.store.getEvent(event.event_id)?.status).toBe('redacted');
+    expect(ctx.store.getEvent(event.event_id)?.text_ref).toBe(null);
+    // event_identity is preserved for traversal (G11).
+    expect(ctx.store.getEvent(event.event_id)?.event_identity).toBe(evId);
+    // dependent claim repaired → redacted (evidence dropped below minimum).
+    expect(ctx.store.getClaim(decision.claim_id)?.status).toBe('redacted');
+    // index no longer surfaces it.
+    expect(searchRealm(ctx, 'better-sqlite3').length).toBe(0);
+  });
+
+  it('deleting the Undiluted cascades to all events and claims', () => {
+    const ctx = seeded.realm.ctx;
+    const anyEvent = ctx.store.listEvents(ctx.realmId)[0]!;
+    const occ = ctx.store.getOccurrence(anyEvent.occurrence_ids[0]!)!;
+    const res = deleteUndiluted(ctx, occ.undiluted_id, { seal: true });
+    expect(res.events).toBeGreaterThan(0);
+    // All consolidated claims are now gone (their evidence was redacted).
+    expect(ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated').length).toBe(0);
+    expect(ctx.store.getUndiluted(occ.undiluted_id)?.status).toBe('deleted');
+    expect(ctx.store.countTombstones(ctx.realmId)).toBeGreaterThan(0);
+  });
+});

@@ -11,6 +11,7 @@ import type { MemEvent } from './schema/entities';
 import { classifyEvent } from '@claim/classify';
 import { abstractEvents } from '@claim/extractor';
 import { consolidatePending } from '@claim/consolidation';
+import { indexClaim, indexEvent } from '@retrieval/search';
 import { RuleBasedProvider, type MemoryProvider } from '@claim/provider';
 import type { RealmContext } from './runtime';
 import { log } from './log';
@@ -88,6 +89,9 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
     .map((e) => ctx.store.getEvent(e.event_id))
     .filter((e): e is MemEvent => Boolean(e));
 
+  // ── index events (after Secret Scan; secret/unknown/unclassified skipped). ────
+  for (const event of classifiedEvents) indexEvent(ctx, event);
+
   // ── abstract → candidates. ───────────────────────────────────────────────────
   const abstractResult = abstractEvents(ctx, provider, classifiedEvents, now);
   stats.candidates += abstractResult.newCandidates.length;
@@ -96,8 +100,11 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
   // ── consolidate (fully automatic). ───────────────────────────────────────────
   const outcomes = consolidatePending(ctx, now);
   for (const o of outcomes) {
-    if (o.status === 'consolidated') stats.consolidated += 1;
-    else if (o.status === 'rejected') stats.rejected += 1;
+    if (o.status === 'consolidated') {
+      stats.consolidated += 1;
+      const claim = ctx.store.getClaim(o.claim_id);
+      if (claim) indexClaim(ctx, claim);
+    } else if (o.status === 'rejected') stats.rejected += 1;
   }
 
   ctx.flush();

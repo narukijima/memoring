@@ -7,6 +7,7 @@ import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { textLooksContextInjected } from '@security/ouroboros';
 import { runSecretScan } from '@security/secret-scan';
+import { eventSealSignature } from '@claim/seal';
 import type { Connector } from './types';
 import type { MemEvent, Occurrence, Session, Source, Undiluted } from '@core/schema/entities';
 import { eventIdentity, sessionIdentity, sourceIdentity } from './identity';
@@ -91,6 +92,13 @@ export function normalizeOccurrence(
 
     if (ctx.store.findEventByIdentity(ctx.realmId, evIdentity)) {
       deduped += 1; // idempotent reprocess / overlap
+      continue;
+    }
+
+    // Forget durability: a Sealed event_identity must not revive on
+    // reprocess / re-capture (§4.15). Raw remains captured in the Undiluted.
+    if (ctx.store.activeSealRulesBySignature(ctx.realmId, eventSealSignature(ctx.realmKey, evIdentity)).length > 0) {
+      deduped += 1;
       continue;
     }
 

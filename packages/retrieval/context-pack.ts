@@ -5,8 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { gate, type GateItem, type GateRequest, bestClassificationState } from '@core/policy';
-import { normalizeLabel } from '@core/label-normalize';
-import { realmHmac, hmacHex } from '@security/crypto-primitives';
+import { hmacHex } from '@security/crypto-primitives';
 import { renderMarkerBlock, signMarker } from '@security/ouroboros';
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
@@ -15,6 +14,7 @@ import { TOKEN_BUDGET_RECIPE, type ContextPurpose } from '@core/recipe';
 import { log } from '@core/log';
 import { readClaimStatement } from '@claim/extractor';
 import { isClaimSuppressed } from '@claim/seal';
+import { resolveActiveLabelIds } from './active-scope';
 import type { Aperture, Audience, ClassificationState } from '@core/schema/enums';
 import type { Claim, ContextPack, MemEvent } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
@@ -88,22 +88,6 @@ function toGateItem(ctx: RealmContext, sc: ScopedClaim): GateItem {
     hasRequiredProvenance: c.evidence_event_identities.length > 0,
     selfGeneratedContext: false, // enforced upstream (consolidation/Ouroboros)
   };
-}
-
-/** Resolve active label ids from active projects (state ∈ {confirmed, inferred}). */
-function resolveActiveLabelIds(ctx: RealmContext, projectIds: string[], scope?: string): string[] {
-  if (scope) {
-    const lbl = ctx.store.findLabelByNormalizedKey(ctx.realmId, realmHmac(ctx.realmKey, normalizeLabel(scope)));
-    return lbl ? [lbl.label_id] : [];
-  }
-  const ids: string[] = [];
-  for (const pid of projectIds) {
-    const project = ctx.config.projects.find((p) => p.project_id === pid);
-    if (!project) continue;
-    const lbl = ctx.store.findLabelByNormalizedKey(ctx.realmId, realmHmac(ctx.realmKey, normalizeLabel(project.name)));
-    if (lbl) ids.push(lbl.label_id);
-  }
-  return ids;
 }
 
 const KIND_SECTION: Record<string, string> = {

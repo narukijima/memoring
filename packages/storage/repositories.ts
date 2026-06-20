@@ -17,11 +17,25 @@ import type {
   SecretScanResult,
   Session,
   Source,
+  Tombstone,
   Undiluted,
 } from '@core/schema/entities';
 
 type Row = Record<string, string | number | null>;
 const b = (v: boolean): number => (v ? 1 : 0);
+
+export interface IndexHit {
+  ref_id: string;
+  ref_type: 'event' | 'claim';
+  sensitivity: string;
+  scope_state: string;
+  label_ids: string; // JSON array
+  norm_text: string;
+}
+
+function likeEscape(s: string): string {
+  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
 
 export class Store {
   /** `onWrite` marks the encrypted DB dirty so the next flush persists. Every
@@ -161,6 +175,29 @@ export class Store {
       doc: JSON.stringify(o),
     });
   }
+  getOccurrence(id: string): Occurrence | undefined {
+    return this.parseDoc<Occurrence>(
+      this.db.prepare('SELECT doc FROM occurrence WHERE occurrence_id = ?').get(id) as
+        | { doc: string }
+        | undefined,
+    );
+  }
+  listOccurrencesByUndiluted(undilutedId: string): Occurrence[] {
+    return this.parseDocs<Occurrence>(
+      this.db.prepare('SELECT doc FROM occurrence WHERE undiluted_id = ?').all(undilutedId) as { doc: string }[],
+    );
+  }
+  listOccurrencesBySource(sourceId: string): Occurrence[] {
+    return this.parseDocs<Occurrence>(
+      this.db.prepare("SELECT doc FROM occurrence WHERE source_id = ? AND status = 'captured'").all(sourceId) as {
+        doc: string;
+      }[],
+    );
+  }
+  /** Events whose occurrence_ids include the given occurrence (doc scan, v0 scale). */
+  listEventsForOccurrence(realmId: string, occurrenceId: string): MemEvent[] {
+    return this.listEvents(realmId).filter((e) => e.occurrence_ids.includes(occurrenceId));
+  }
 
   // ── event / secret scan ────────────────────────────────────────────────────
   putEvent(e: MemEvent): void {
@@ -296,6 +333,10 @@ export class Store {
       this.db.prepare('SELECT doc FROM claim WHERE realm_id = ?').all(realmId) as { doc: string }[],
     );
   }
+  /** Claims whose evidence cites a given event_identity (doc scan, v0 scale). */
+  listClaimsCitingEvent(realmId: string, eventIdentity: string): Claim[] {
+    return this.listClaims(realmId).filter((c) => c.evidence_event_identities.includes(eventIdentity));
+  }
 
   // ── derivation / context pack ───────────────────────────────────────────────
   putDerivation(d: Derivation): void {
@@ -351,6 +392,104 @@ export class Store {
         )
         .all(realmId, signature) as { doc: string }[],
     );
+  }
+  listSealRules(realmId: string): SealRule[] {
+    return this.parseDocs<SealRule>(
+      this.db.prepare('SELECT doc FROM seal_rule WHERE realm_id = ?').all(realmId) as { doc: string }[],
+    );
+  }
+  getSealRule(id: string): SealRule | undefined {
+    return this.parseDoc<SealRule>(
+      this.db.prepare('SELECT doc FROM seal_rule WHERE suppression_id = ?').get(id) as
+        | { doc: string }
+        | undefined,
+    );
+  }
+
+  // ── tombstone ────────────────────────────────────────────────────────────────
+  putTombstone(t: Tombstone): void {
+    this.upsert('tombstone', {
+      tombstone_id: t.tombstone_id,
+      realm_id: t.realm_id,
+      deleted_ref: t.deleted_ref,
+      doc: JSON.stringify(t),
+    });
+  }
+  countTombstones(realmId: string): number {
+    const r = this.db.prepare('SELECT COUNT(*) AS c FROM tombstone WHERE realm_id = ?').get(realmId) as { c: number };
+    return r.c;
+  }
+
+  // ── assignments by label (for merge/rename) ───────────────────────────────────
+  listAssignmentsByLabel(realmId: string, labelId: string): Assignment[] {
+    return this.parseDocs<Assignment>(
+      this.db.prepare('SELECT doc FROM assignment WHERE realm_id = ?').all(realmId) as { doc: string }[],
+    ).filter((a) => a.label_ids.includes(labelId));
+  }
+
+  // ── search index ─────────────────────────────────────────────────────────────
+  indexUpsert(entry: {
+    ref_id: string;
+    ref_type: 'event' | 'claim';
+    realm_id: string;
+    label_ids: string[];
+    sensitivity: string;
+    scope_state: string;
+    norm_text: string;
+  }): void {
+    this.upsert('doc_index', {
+      ref_id: entry.ref_id,
+      ref_type: entry.ref_type,
+      realm_id: entry.realm_id,
+      label_ids: JSON.stringify(entry.label_ids),
+      sensitivity: entry.sensitivity,
+      scope_state: entry.scope_state,
+      norm_text: entry.norm_text,
+    });
+    this.db.prepare('DELETE FROM doc_fts WHERE ref_id = ?').run(entry.ref_id);
+    this.db.prepare('INSERT INTO doc_fts(norm_text, ref_id) VALUES (?, ?)').run(entry.norm_text, entry.ref_id);
+    this.onWrite();
+  }
+
+  indexDelete(refId: string): void {
+    this.db.prepare('DELETE FROM doc_index WHERE ref_id = ?').run(refId);
+    this.db.prepare('DELETE FROM doc_fts WHERE ref_id = ?').run(refId);
+    this.onWrite();
+  }
+
+  indexClear(realmId: string): void {
+    const refs = this.db.prepare('SELECT ref_id FROM doc_index WHERE realm_id = ?').all(realmId) as {
+      ref_id: string;
+    }[];
+    for (const r of refs) this.db.prepare('DELETE FROM doc_fts WHERE ref_id = ?').run(r.ref_id);
+    this.db.prepare('DELETE FROM doc_index WHERE realm_id = ?').run(realmId);
+    this.onWrite();
+  }
+
+  /** Exact / substring match via LIKE on normalized text (handles short CJK). */
+  searchExact(realmId: string, normQuery: string): IndexHit[] {
+    return this.db
+      .prepare(
+        `SELECT ref_id, ref_type, sensitivity, scope_state, label_ids, norm_text
+         FROM doc_index WHERE realm_id = ? AND norm_text LIKE ? ESCAPE '\\' LIMIT 200`,
+      )
+      .all(realmId, `%${likeEscape(normQuery)}%`) as IndexHit[];
+  }
+
+  /** n-gram (trigram) fallback via FTS5; query treated as a quoted phrase. */
+  searchFts(realmId: string, normQuery: string): IndexHit[] {
+    const phrase = `"${normQuery.replace(/"/g, '""')}"`;
+    try {
+      return this.db
+        .prepare(
+          `SELECT d.ref_id, d.ref_type, d.sensitivity, d.scope_state, d.label_ids, d.norm_text
+           FROM doc_fts f JOIN doc_index d ON d.ref_id = f.ref_id
+           WHERE f.norm_text MATCH ? AND d.realm_id = ? LIMIT 200`,
+        )
+        .all(phrase, realmId) as IndexHit[];
+    } catch {
+      return []; // MATCH syntax error on odd input → fall back to exact only
+    }
   }
 
   // ── quarantine ──────────────────────────────────────────────────────────────

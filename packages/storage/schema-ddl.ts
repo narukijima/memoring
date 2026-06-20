@@ -113,4 +113,16 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at TEXT NOT NULL, doc TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(realm_id, state, stage);
+
+-- Search index. Lives INSIDE the encrypted DB blob, so it is encrypted at rest
+-- and never written as a plaintext file (NFR-005/008). norm_text powers exact /
+-- substring (LIKE), doc_fts powers n-gram (trigram) fallback incl. CJK (NFR-018).
+-- index build happens only after Secret Scan; secret/unknown are never indexed.
+CREATE TABLE IF NOT EXISTS doc_index (
+  ref_id TEXT PRIMARY KEY, ref_type TEXT NOT NULL, realm_id TEXT NOT NULL,
+  label_ids TEXT NOT NULL, sensitivity TEXT NOT NULL, scope_state TEXT NOT NULL,
+  norm_text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_doc_realm ON doc_index(realm_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS doc_fts USING fts5(norm_text, ref_id UNINDEXED, tokenize='trigram');
 `;
