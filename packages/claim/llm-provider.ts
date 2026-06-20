@@ -24,16 +24,20 @@ export interface LlmBackend {
 // pasted role/mission prompts and one-off task instructions must NOT be kept.
 const EXTRACTION_INSTRUCTION = [
   'You extract DURABLE, cross-session memories from a coding assistant conversation.',
+  'A memory is DURABLE if it stays useful in a FUTURE, unrelated session: a standing user',
+  'preference ("I always use X", "never Y"), a settled decision ("we decided X", "X will be',
+  'used"), a stable project fact, or a reusable procedure.',
+  'Do NOT keep: ephemeral or one-off task instructions, pasted role/mission/agent prompts',
+  '("You are a ... reviewer"), tool output, shell banners, greetings, or anything specific',
+  'only to the current task.',
   'Return ONLY a JSON array (no prose, no code fence). Each element:',
   '{"kind": one of ["preference","constraint","decision","fact","project_context","procedure"],',
   ' "statement": a concise, self-contained restatement (<= 280 chars),',
   ' "confidence": number 0..1,',
   ' "mode": "explicit" if the user stated it directly, else "inferred",',
   ' "source": the [#N] turn number this memory came from}.',
-  'Keep ONLY memories that stay useful in a FUTURE, unrelated session: standing user',
-  'preferences, hard constraints, settled decisions, stable project facts, reusable procedures.',
-  'Do NOT keep: ephemeral or one-off task instructions, pasted role/mission/agent prompts,',
-  'tool output, shell banners, greetings, or anything specific only to the current task.',
+  "Example — turn '[#9 user] I always use tabs, never spaces.' yields:",
+  '[{"kind":"preference","statement":"Uses tabs, never spaces.","confidence":0.9,"mode":"explicit","source":9}]',
   'If nothing qualifies, return [].',
 ].join('\n');
 
