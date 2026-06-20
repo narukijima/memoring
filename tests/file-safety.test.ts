@@ -1,14 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { writeContextFileSafely } from '@retrieval/context-pack';
+import { atomicWriteFile } from '@storage/fs-safety';
 
 let dir: string;
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'memoring-fs-'));
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -41,5 +43,17 @@ describe('context.md file safety (G7 / NFR-034)', () => {
   it('refuses even a DANGLING symlink (target does not exist) — lstat, not existsSync', () => {
     fs.symlinkSync(path.join(dir, 'nonexistent-target'), path.join(dir, '.memoring'));
     expect(() => writeContextFileSafely(path.join('.memoring', 'sub', 'context.md'), 'hi', dir)).toThrow(/symlink/);
+  });
+});
+
+describe('atomicWriteFile durability', () => {
+  it('fsyncs the temporary file before publishing the rename when durable', () => {
+    const fsync = vi.spyOn(fs, 'fsyncSync');
+    const out = path.join(dir, 'sealed.blob');
+
+    atomicWriteFile(out, 'sealed', 0o600, true);
+
+    expect(fs.readFileSync(out, 'utf8')).toBe('sealed');
+    expect(fsync).toHaveBeenCalled();
   });
 });

@@ -5,17 +5,34 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** Write atomically (tmp in same dir + rename) and chmod 0600. */
-export function atomicWriteFile(filePath: string, data: Buffer | string, mode = 0o600): void {
+export function atomicWriteFile(filePath: string, data: Buffer | string, mode = 0o600, durable = false): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, `.tmp-${randomBytes(6).toString('hex')}`);
-  fs.writeFileSync(tmp, data, { mode });
+  const fd = fs.openSync(tmp, 'w', mode);
+  try {
+    fs.writeFileSync(fd, data);
+    if (durable) fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
   try {
     fs.chmodSync(tmp, mode);
   } catch {
     /* best-effort on platforms without chmod */
   }
   fs.renameSync(tmp, filePath);
+  if (!durable) return;
+  try {
+    const dirFd = fs.openSync(dir, 'r');
+    try {
+      fs.fsyncSync(dirFd);
+    } finally {
+      fs.closeSync(dirFd);
+    }
+  } catch {
+    /* best-effort on filesystems that do not fsync directories */
+  }
 }
 
 export function ensureDir(dir: string, mode = 0o700): void {
