@@ -155,7 +155,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   });
 
   // 4. Assemble fixed sections.
-  const md = renderMarkdown(ctx, passed, conflictsOpen, scopeRes.basis, activeLabelIds, opts, now, audience, aperture, purpose);
+  const md = renderMarkdown(ctx, passed, conflictsOpen, scopeRes.basis, activeLabelIds, audience, aperture, purpose);
 
   // 5. ContextPack manifest + signed Ouroboros marker.
   const packId = newId('contextPack', now.getTime());
@@ -214,8 +214,6 @@ function renderMarkdown(
   conflictsOpen: ScopedClaim[],
   basis: string,
   activeLabelIds: string[],
-  opts: BuildOptions,
-  now: Date,
   audience: Audience,
   aperture: Aperture,
   purpose: ContextPurpose,

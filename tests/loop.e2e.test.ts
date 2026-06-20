@@ -9,7 +9,7 @@ import { runLoop } from '@core/loop';
 import { buildContext } from '@retrieval/context-pack';
 import { claudeCodeConnector } from '@integrations/claude-code/index';
 import { sourceIdentity } from '@intake/identity';
-import type { ConnectorInstance, Project, Source } from '@core/schema/entities';
+import type { ConnectorInstance, Source } from '@core/schema/entities';
 import { makeTempRealm, type TempRealm } from './helpers';
 
 // The fixture transcript records cwd=/tmp/memoring-proj; classify keys scope off

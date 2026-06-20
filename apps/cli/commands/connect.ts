@@ -6,7 +6,7 @@ import path from 'node:path';
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { replicaLayout } from '@core/paths';
-import { openRealm, type RealmContext } from '@core/runtime';
+import { openRealm } from '@core/runtime';
 import { writeRealmConfig, type RealmConnectorConfig, type RealmProjectConfig } from '@core/realm';
 import { getConnector } from '@intake/registry';
 import { sourceIdentity } from '@intake/identity';
