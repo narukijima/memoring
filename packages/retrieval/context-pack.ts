@@ -118,20 +118,33 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     crossScopeAllowed: false,
   };
 
-  // 2. Gate First — gate every consolidated/conflicted claim; rank only survivors.
-  const consolidated = ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated');
-  const conflicted = ctx.store.listClaimsByStatus(ctx.realmId, 'conflicted');
-  const scoped: ScopedClaim[] = [...consolidated, ...conflicted].map((claim) => {
+  // 2. Gate First — gate every claim before ranking. Consolidated claims feed
+  //    normal recall. A conflicted claim is dropped from normal recall but
+  //    surfaced in the "Open conflicts" section IF it satisfies every OTHER Gate
+  //    condition — i.e. only not_conflicted_for_request is allowed to fail
+  //    (§3.4). A conflicted claim that is also secret / out-of-scope /
+  //    unclassified / unsafe is still fully dropped.
+  const toScoped = (claim: Claim): ScopedClaim => {
     const sc = claimScope(ctx, claim);
     return { claim, statement: readClaimStatement(ctx, claim), labelIds: sc.labelIds, scopeState: sc.scopeState };
-  });
+  };
 
   const passed: ScopedClaim[] = [];
+  const conflictsOpen: ScopedClaim[] = [];
   let dropped = 0;
-  for (const sc of scoped) {
-    const result = gate(toGateItem(ctx, sc), req);
-    if (result.pass) passed.push(sc);
+  for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')) {
+    const sc = toScoped(claim);
+    if (gate(toGateItem(ctx, sc), req).pass) passed.push(sc);
     else dropped += 1;
+  }
+  for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'conflicted')) {
+    const sc = toScoped(claim);
+    const result = gate(toGateItem(ctx, sc), req);
+    if (result.failed.length === 1 && result.failed[0] === 'not_conflicted_for_request') {
+      conflictsOpen.push(sc);
+    } else {
+      dropped += 1;
+    }
   }
 
   // 3. Ranking (after the Gate): reinforcement desc, then recency.
@@ -142,7 +155,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   });
 
   // 4. Assemble fixed sections.
-  const md = renderMarkdown(ctx, passed, scopeRes.basis, activeLabelIds, opts, now, audience, aperture, purpose);
+  const md = renderMarkdown(ctx, passed, conflictsOpen, scopeRes.basis, activeLabelIds, opts, now, audience, aperture, purpose);
 
   // 5. ContextPack manifest + signed Ouroboros marker.
   const packId = newId('contextPack', now.getTime());
@@ -180,7 +193,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     manifest_only: true,
     body_ref: null,
     self_ingestion_marker_digest: marker.digest,
-    evidence_ids: passed.map((p) => p.claim.claim_id),
+    evidence_ids: [...passed, ...conflictsOpen].map((p) => p.claim.claim_id),
     schema_version: SCHEMA_VERSION.contextPack,
   };
   ctx.store.putContextPack(pack);
@@ -198,6 +211,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
 function renderMarkdown(
   ctx: RealmContext,
   passed: ScopedClaim[],
+  conflictsOpen: ScopedClaim[],
   basis: string,
   activeLabelIds: string[],
   opts: BuildOptions,
@@ -207,12 +221,7 @@ function renderMarkdown(
   purpose: ContextPurpose,
 ): string {
   const bySection = new Map<string, ScopedClaim[]>();
-  const conflictsOpen: ScopedClaim[] = [];
   for (const sc of passed) {
-    if (sc.claim.status === 'conflicted') {
-      conflictsOpen.push(sc);
-      continue;
-    }
     const section = KIND_SECTION[sc.claim.kind] ?? 'Pinned / consolidated memories';
     const arr = bySection.get(section) ?? [];
     arr.push(sc);
@@ -279,9 +288,10 @@ function renderMarkdown(
   // 10. Citations / Evidence Map — opaque IDs only (clm_/evt_), no transcript paths.
   lines.push('## Citations / Evidence Map');
   lines.push('');
-  if (passed.length === 0) lines.push('_No citations._');
+  const cited = [...passed, ...conflictsOpen];
+  if (cited.length === 0) lines.push('_No citations._');
   else
-    for (const sc of passed) {
+    for (const sc of cited) {
       lines.push(`- ${sc.claim.claim_id}: kind=${sc.claim.kind}, evidence=${sc.claim.evidence_count}`);
     }
   lines.push('');

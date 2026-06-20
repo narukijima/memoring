@@ -138,3 +138,41 @@ describe('delete / redact cascade (G10 / §7.3)', () => {
     expect(after.evidence_occurrence_ids).not.toContain(occId);
   });
 });
+
+describe('Open conflicts section (§3.4 not_conflicted_for_request)', () => {
+  it('emits an otherwise-safe conflicted claim into Open conflicts, not normal recall', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    // The loop would mark this conflicted on counter-evidence; simulate that state.
+    ctx.store.putClaim({ ...decision, status: 'conflicted', conflict_reason: 'duplicate_candidate' });
+
+    const result = buildContext(ctx, { cwd: seeded.projectRoot, outPath: path.join('.memoring', 'context.md') });
+    expect(result.kind).toBe('written');
+    const doc = fs.readFileSync(path.join(seeded.projectRoot, '.memoring', 'context.md'), 'utf8');
+
+    const conflictsSection = doc.slice(doc.indexOf('## Open conflicts'), doc.indexOf('## Citations'));
+    expect(conflictsSection).toContain('(conflict)');
+    expect(conflictsSection).toContain(decision.claim_id);
+
+    // It must NOT leak into normal recall (Recent decisions).
+    const decisionsSection = doc.slice(doc.indexOf('## Recent decisions'), doc.indexOf('## Relevant episodic'));
+    expect(decisionsSection).not.toContain(decision.claim_id);
+  });
+
+  it('fully drops a conflicted claim that also fails another Gate axis (e.g. out of scope)', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    ctx.store.putClaim({ ...decision, status: 'conflicted', conflict_reason: 'duplicate_candidate' });
+
+    // Build with an unknown --scope so active_scope_match also fails: the conflicted
+    // claim must NOT appear even in Open conflicts (more than one Gate axis fails).
+    const result = buildContext(ctx, {
+      cwd: seeded.projectRoot,
+      scope: 'no-such-scope-label',
+      outPath: path.join('.memoring', 'context.md'),
+    });
+    expect(result.kind).toBe('written');
+    const doc = fs.readFileSync(path.join(seeded.projectRoot, '.memoring', 'context.md'), 'utf8');
+    expect(doc).not.toContain(decision.claim_id);
+  });
+});
