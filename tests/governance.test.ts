@@ -69,6 +69,19 @@ describe('forget / Seal durability (G10 / §4.15)', () => {
     expect(validateClaim(ctx, fresh, statement).decision).toBe('consolidated');
   });
 
+  it('tombstones the ContextPack manifest reference when its claim is forgotten (§7.3 final step)', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    buildContext(ctx, { cwd: seeded.projectRoot, outPath: path.join('.memoring', 'context.md') });
+    expect(ctx.store.listContextPacks(ctx.realmId).some((p) => p.evidence_ids.includes(decision.claim_id))).toBe(true);
+    const tombsBefore = ctx.store.countTombstones(ctx.realmId);
+
+    forgetClaim(ctx, decision.claim_id, { seal: true });
+
+    expect(ctx.store.listContextPacks(ctx.realmId).some((p) => p.evidence_ids.includes(decision.claim_id))).toBe(false);
+    expect(ctx.store.countTombstones(ctx.realmId)).toBeGreaterThan(tombsBefore);
+  });
+
   it('forgotten claims never appear in a later context build', () => {
     const ctx = seeded.realm.ctx;
     const decision = consolidatedByKind('decision');

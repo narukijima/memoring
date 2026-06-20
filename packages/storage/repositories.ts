@@ -349,6 +349,11 @@ export class Store {
       doc: JSON.stringify(c),
     });
   }
+  listContextPacks(realmId: string): ContextPack[] {
+    return this.parseDocs<ContextPack>(
+      this.db.prepare('SELECT doc FROM context_pack WHERE realm_id = ?').all(realmId) as { doc: string }[],
+    );
+  }
 
   // ── chronicle ────────────────────────────────────────────────────────────────
   putChronicle(c: Chronicle): void {

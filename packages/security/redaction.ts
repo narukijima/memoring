@@ -34,6 +34,17 @@ function tombstone(ctx: RealmContext, deletedRef: string, range: string, now: Da
   ctx.store.putTombstone(t);
 }
 
+/** Final cascade step (§7.3): drop a redacted Claim's id from any stored
+ *  ContextPack manifest and tombstone the reference, so no manifest retains a
+ *  dangling pointer to deleted content. */
+function tombstoneClaimFromPacks(ctx: RealmContext, claimId: string, now: Date): void {
+  for (const pack of ctx.store.listContextPacks(ctx.realmId)) {
+    if (!pack.evidence_ids.includes(claimId)) continue;
+    ctx.store.putContextPack({ ...pack, evidence_ids: pack.evidence_ids.filter((id) => id !== claimId) });
+    tombstone(ctx, pack.context_pack_id, 'context_pack_evidence', now);
+  }
+}
+
 /** Redact one Event: drop normalized text + object, keep event_identity, deindex. */
 export function redactEvent(ctx: RealmContext, event: MemEvent, now = new Date()): void {
   if (event.text_ref) {
@@ -75,6 +86,7 @@ function repairClaimsCiting(
       updated.status = 'redacted';
       updated.conflict_reason = 'evidence_insufficient_after_redaction';
       ctx.store.indexDelete(claim.claim_id);
+      tombstoneClaimFromPacks(ctx, claim.claim_id, now);
     }
     ctx.store.putClaim(updated);
   }
@@ -153,6 +165,7 @@ export function forgetClaim(
   const statement = readClaimStatement(ctx, claim);
   ctx.store.putClaim({ ...claim, status: 'redacted', conflict_reason: 'forgotten' });
   ctx.store.indexDelete(claimId);
+  tombstoneClaimFromPacks(ctx, claimId, now);
   ctx.chronicler.append('redact', claimId, now);
   if (opts.seal !== false) {
     createSealRule(ctx, 'content_signature', contentSealSignature(ctx.realmKey, claim.kind, statement), now);
