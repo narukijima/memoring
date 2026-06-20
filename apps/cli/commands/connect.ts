@@ -179,6 +179,6 @@ export function printLoopStats(stats: LoopStats): void {
     `  Loop: captured=${stats.captured} events=${stats.events} quarantined=${stats.quarantined} ` +
       `parse_failures=${stats.parseFailures} ` +
       `classified=${stats.classified} candidates=${stats.candidates} merged=${stats.merged} ` +
-      `consolidated=${stats.consolidated} rejected=${stats.rejected}`,
+      `abstract_failures=${stats.abstractFailures} consolidated=${stats.consolidated} rejected=${stats.rejected}`,
   );
 }

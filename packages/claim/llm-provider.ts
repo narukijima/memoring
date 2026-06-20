@@ -41,8 +41,18 @@ const EXTRACTION_INSTRUCTION = [
   'If nothing qualifies, return [].',
 ].join('\n');
 
+// Cap per-turn text sent to the model. A durable memory lives in the user's
+// statement, not in a 100K-char pasted blob, and oversized prompts overflow a
+// local model's context window (and waste tokens on a remote one). The full
+// Event is still stored; only the LLM *input* is bounded.
+const MAX_TURN_CHARS = 4000;
+
+function clipTurn(text: string): string {
+  return text.length > MAX_TURN_CHARS ? `${text.slice(0, MAX_TURN_CHARS)} …[truncated]` : text;
+}
+
 export function buildPrompt(inputs: AbstractInput[]): string {
-  const turns = inputs.map((i, n) => `[#${n + 1} ${i.role ?? i.origin}] ${i.text}`).join('\n\n');
+  const turns = inputs.map((i, n) => `[#${n + 1} ${i.role ?? i.origin}] ${clipTurn(i.text)}`).join('\n\n');
   return `${EXTRACTION_INSTRUCTION}\n\nConversation turns:\n${turns}`;
 }
 

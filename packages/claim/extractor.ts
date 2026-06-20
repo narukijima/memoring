@@ -9,12 +9,14 @@ import { normalizeLabel } from '@core/label-normalize';
 import { hmacHex } from '@security/crypto-primitives';
 import { isIndependentEvidenceOrigin, maxSensitivityOf, type Sensitivity } from '@core/schema/enums';
 import { allowedSensitivity, allowedSensitivityState } from '@core/policy';
+import { log } from '@core/log';
 import type { Claim, Derivation, MemEvent } from '@core/schema/entities';
-import type { AbstractInput, MemoryProvider } from './provider';
+import type { AbstractCandidate, AbstractInput, MemoryProvider } from './provider';
 
 /** Events per provider.abstract() call. An LLM round-trip costs ~the same for 1
- *  or N inputs, so batching cuts API calls ~N×; Mode A is unaffected by size. */
-const ABSTRACT_BATCH_SIZE = 20;
+ *  or N inputs, so batching cuts API calls ~N×; Mode A is unaffected by size.
+ *  Kept modest so a batch's prompt stays within a local model's context window. */
+const ABSTRACT_BATCH_SIZE = 12;
 
 function readText(ctx: RealmContext, event: MemEvent): string | null {
   if (!event.text_ref) return null;
@@ -54,6 +56,10 @@ function recordDerivation(ctx: RealmContext, provider: MemoryProvider, event: Me
 export interface AbstractResult {
   newCandidates: Claim[];
   merged: number;
+  /** Batches whose provider.abstract() threw (e.g. a model/network error). The
+   *  batch is skipped and the loop continues — never aborted — so one bad call
+   *  does not lose the whole run; the count is surfaced (FR-013, no silent drop). */
+  failed: number;
 }
 
 export async function abstractEvents(
@@ -64,6 +70,7 @@ export async function abstractEvents(
 ): Promise<AbstractResult> {
   const newCandidates: Claim[] = [];
   let merged = 0;
+  let failed = 0;
 
   // Filter to eligible events and read their text once. Only user-origin events
   // (independent evidence; never context_injected assistant text, Ouroboros) feed
@@ -89,7 +96,16 @@ export async function abstractEvents(
   // Abstract in batches; each candidate names the input event it came from.
   for (let start = 0; start < eligible.length; start += ABSTRACT_BATCH_SIZE) {
     const batch = eligible.slice(start, start + ABSTRACT_BATCH_SIZE);
-    const candidates = await provider.abstract(batch.map((b) => b.input));
+    let candidates: AbstractCandidate[];
+    try {
+      candidates = await provider.abstract(batch.map((b) => b.input));
+    } catch (e) {
+      // One bad batch (model error / network / timeout) must not abort the whole
+      // run and lose every other event. Skip it, count it, keep going.
+      failed += 1;
+      log.warn('abstract:batch_failed', { size: batch.length, msg: (e as Error).message });
+      continue;
+    }
 
     for (const cand of candidates) {
       const src = batch[cand.sourceIndex];
@@ -162,7 +178,7 @@ export async function abstractEvents(
     }
   }
 
-  return { newCandidates, merged };
+  return { newCandidates, merged, failed };
 }
 
 /** Read the (decrypted) statement text for a claim — used by context-pack. */

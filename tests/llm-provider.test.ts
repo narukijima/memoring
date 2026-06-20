@@ -83,6 +83,20 @@ class FixedProvider implements MemoryProvider {
   }
 }
 
+/** Throws on its first call, then succeeds — used to pin batch-level resilience. */
+class FlakyProvider implements MemoryProvider {
+  id = 'flaky';
+  name = 'flaky';
+  version = 'flaky.v1';
+  egress = 'local' as const;
+  calls = 0;
+  abstract(): AbstractCandidate[] {
+    this.calls += 1;
+    if (this.calls === 1) throw new Error('boom');
+    return [{ kind: 'fact', statement: 'survived', confidence: 0.9, mode: 'explicit', sourceIndex: 0 }];
+  }
+}
+
 describe('LLM provider response parsing', () => {
   it('parses a bare JSON array of candidates (source omitted → index 0)', () => {
     const out = parseCandidates(
@@ -117,6 +131,12 @@ describe('LLM provider response parsing', () => {
     expect(prompt).toContain('DURABLE');
     expect(prompt).toContain('pasted role/mission/agent prompts');
     expect(prompt).toContain('あなたはレビュアーです');
+  });
+
+  it('caps per-turn text so an oversized paste cannot overflow the model context', () => {
+    const prompt = buildPrompt([{ text: 'x'.repeat(50_000), origin: 'user', role: 'user' }]);
+    expect(prompt).toContain('…[truncated]');
+    expect(prompt.length).toBeLessThan(10_000); // instruction + one ~4K-char turn, not 50K
   });
 
   it('LlmMemoryProvider forwards backend output and inherits its egress class', async () => {
@@ -274,5 +294,15 @@ describe('batched abstraction attributes each candidate to its source event', ()
     };
     const res = await abstractEvents(realm.ctx, provider, [e0]);
     expect(res.newCandidates).toHaveLength(0);
+  });
+
+  it('skips a failed abstraction batch and keeps going (one bad call never aborts the run)', async () => {
+    const events = [];
+    for (let i = 0; i < 13; i++) events.push(putEvent('user', `turn ${i}`, 'internal'));
+    const provider = new FlakyProvider(); // throws on batch 1 (12 events), succeeds on batch 2 (1 event)
+    const res = await abstractEvents(realm.ctx, provider, events);
+    expect(provider.calls).toBe(2); // both batches attempted despite the first throwing
+    expect(res.failed).toBe(1); // the failure is counted, not swallowed
+    expect(res.newCandidates).toHaveLength(1); // the surviving batch's candidate is still recorded
   });
 });

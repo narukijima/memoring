@@ -26,6 +26,9 @@ export interface LoopStats {
   classified: number;
   candidates: number;
   merged: number;
+  /** Abstraction batches that errored (model/network/timeout) and were skipped —
+   *  the run continues; this surfaces incomplete LLM coverage (never a silent drop). */
+  abstractFailures: number;
   consolidated: number;
   rejected: number;
 }
@@ -49,6 +52,7 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
     classified: 0,
     candidates: 0,
     merged: 0,
+    abstractFailures: 0,
     consolidated: 0,
     rejected: 0,
   };
@@ -100,6 +104,10 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
   const abstractResult = await abstractEvents(ctx, provider, classifiedEvents, now);
   stats.candidates += abstractResult.newCandidates.length;
   stats.merged += abstractResult.merged;
+  stats.abstractFailures = abstractResult.failed;
+  if (stats.abstractFailures > 0) {
+    log.warn('loop:abstract_failures', { count: stats.abstractFailures });
+  }
 
   // ── consolidate (fully automatic). ───────────────────────────────────────────
   const outcomes = consolidatePending(ctx, now);
