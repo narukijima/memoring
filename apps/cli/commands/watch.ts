@@ -13,6 +13,7 @@ import { runLoop, type LoopStats } from '@core/loop';
 import { log } from '@core/log';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import { resolveProvider } from '../provider';
 
 async function watchRoots(ctx: RealmContext): Promise<string[]> {
   const roots = new Set<string>();
@@ -69,8 +70,10 @@ export async function cmdWatch(argv: string[]): Promise<number> {
     return 0;
   }
 
+  const memoryProvider = resolveProvider();
+
   // Catch-up pass.
-  printStats(await withRealm((ctx) => runLoop(ctx, { method: 'watch' })));
+  printStats(await withRealm((ctx) => runLoop(ctx, { method: 'watch', provider: memoryProvider })));
 
   const roots = await withRealm((ctx) => watchRoots(ctx));
   console.log(`  Watching ${roots.length} location(s) for selected sources. Ctrl-C to stop.`);
@@ -82,7 +85,7 @@ export async function cmdWatch(argv: string[]): Promise<number> {
     if (running) return;
     running = true;
     try {
-      printStats(await withRealm((ctx) => runLoop(ctx, { method: 'watch' })));
+      printStats(await withRealm((ctx) => runLoop(ctx, { method: 'watch', provider: memoryProvider })));
     } catch (e) {
       log.error('watch:loop_error', { msg: (e as Error).message });
     } finally {

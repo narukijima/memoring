@@ -6,6 +6,7 @@ import { openActiveRealm } from '@core/runtime';
 import { runLoop } from '@core/loop';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import { resolveProvider } from '../provider';
 import { printLoopStats } from './connect';
 
 export async function cmdBackfill(argv: string[]): Promise<number> {
@@ -16,7 +17,7 @@ export async function cmdBackfill(argv: string[]): Promise<number> {
       console.log('  No connectors configured. Run `memoring connect claude-code` first.');
       return 0;
     }
-    const stats = await runLoop(ctx, { method: 'backfill' });
+    const stats = await runLoop(ctx, { method: 'backfill', provider: resolveProvider() });
     printLoopStats(stats);
     return 0;
   } finally {

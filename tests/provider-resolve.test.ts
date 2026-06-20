@@ -1,0 +1,46 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { resolveProvider } from '../apps/cli/provider';
+import { RuleBasedProvider } from '@claim/provider';
+import { LlmMemoryProvider } from '@claim/llm-provider';
+
+const LLM_ENV = [
+  'MEMORING_LLM_BASE_URL',
+  'MEMORING_LLM_MODEL',
+  'MEMORING_LLM_API_KEY',
+  'MEMORING_LLM_EGRESS',
+  'MEMORING_LLM_ID',
+];
+function clearLlmEnv(): void {
+  for (const k of LLM_ENV) delete process.env[k];
+}
+afterEach(clearLlmEnv);
+
+describe('resolveProvider (env-driven provider selection)', () => {
+  it('defaults to the deterministic rule-based provider when no LLM env is set', () => {
+    clearLlmEnv();
+    expect(resolveProvider()).toBeInstanceOf(RuleBasedProvider);
+  });
+
+  it('builds a remote LLM provider for a cloud OpenAI-compatible endpoint', () => {
+    clearLlmEnv();
+    process.env.MEMORING_LLM_BASE_URL = 'https://api.deepseek.com/v1';
+    process.env.MEMORING_LLM_MODEL = 'deepseek-chat';
+    const p = resolveProvider();
+    expect(p).toBeInstanceOf(LlmMemoryProvider);
+    expect(p.egress).toBe('remote'); // off-device → pre-egress gate applies
+    expect(p.id).toBe('llm:openai_compatible:deepseek-chat');
+  });
+
+  it('infers local egress (gate-exempt) for a loopback Ollama endpoint', () => {
+    clearLlmEnv();
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    expect(resolveProvider().egress).toBe('local');
+  });
+
+  it('falls back to rule-based (never a half-configured LLM) when the model is missing', () => {
+    clearLlmEnv();
+    process.env.MEMORING_LLM_BASE_URL = 'https://api.deepseek.com/v1';
+    expect(resolveProvider()).toBeInstanceOf(RuleBasedProvider);
+  });
+});

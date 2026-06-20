@@ -16,6 +16,7 @@ import type { ConnectorInstance, Project, Source } from '@core/schema/entities';
 import { log } from '@core/log';
 import { ask, getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import { resolveProvider } from '../provider';
 
 function normalizeConnectorId(raw: string | undefined): string {
   return (raw ?? 'claude-code').replace(/-/g, '_');
@@ -161,7 +162,7 @@ export async function cmdConnect(argv: string[]): Promise<number> {
 
     if (flags.backfill === true) {
       console.log('  Running backfill loop...');
-      const stats = await runLoop(ctx, { method: 'backfill' });
+      const stats = await runLoop(ctx, { method: 'backfill', provider: resolveProvider() });
       printLoopStats(stats);
     } else {
       console.log('  Next: `memoring backfill` to ingest history, then `memoring context build`.');

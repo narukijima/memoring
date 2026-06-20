@@ -48,6 +48,13 @@ Environment:
   MEMORING_PASSPHRASE   Use instead of prompting (headless/tests).
   MEMORING_HOME         Replica root (default ~/.memoring).
   MEMORING_CLAUDE_DIR   Claude Code projects dir (default ~/.claude/projects).
+  MEMORING_LLM_BASE_URL OpenAI-compatible endpoint to use an LLM classifier (Mode B/C).
+                        Unset = deterministic rule-based provider (Mode A, default).
+                        e.g. https://api.deepseek.com/v1 · https://api.openai.com/v1
+                             · http://127.0.0.1:11434/v1 (local Ollama → on-device)
+  MEMORING_LLM_MODEL    Model id (e.g. deepseek-chat, gpt-4o-mini, qwen2.5:3b).
+  MEMORING_LLM_API_KEY  API key for a remote endpoint (never persisted in config).
+  MEMORING_LLM_EGRESS   Force local|remote (default: remote unless the URL is loopback).
 `;
 
 async function main(): Promise<number> {
