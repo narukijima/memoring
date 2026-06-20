@@ -95,6 +95,9 @@ Protects against:
 - Silent default egress: a remote provider is never the default; nothing egresses
   unless a remote provider is explicitly constructed (and, in increment 2,
   explicitly enabled in config).
+- A loopback URL that is actually a forwarding / subscription-bridging proxy:
+  `MEMORING_LLM_PROXY` (CLI, unsupported path) forces egress=remote so the
+  loopback→local heuristic cannot silently exempt off-device traffic from the gate.
 
 Does **not** protect against:
 - The third-party data handling a user opts into for the public/internal text
