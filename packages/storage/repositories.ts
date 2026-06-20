@@ -466,12 +466,22 @@ export class Store {
     this.onWrite();
   }
 
+  // Push the cheap stored safety predicates into SQL so the LIMIT applies to
+  // already-safe candidates (secret/unknown are never indexed anyway; this is
+  // defense in depth and stops rejected/other rows from crowding out in-scope
+  // ones before the JS scope/Seal filter). ORDER BY makes truncation deterministic.
+  private static readonly CANDIDATE_FILTER =
+    `sensitivity NOT IN ('secret','unknown') AND scope_state IN ('candidate','inferred','confirmed','conflicted')`;
+  private static readonly SEARCH_CAP = 1000;
+
   /** Exact / substring match via LIKE on normalized text (handles short CJK). */
   searchExact(realmId: string, normQuery: string): IndexHit[] {
     return this.db
       .prepare(
         `SELECT ref_id, ref_type, sensitivity, scope_state, label_ids, norm_text
-         FROM doc_index WHERE realm_id = ? AND norm_text LIKE ? ESCAPE '\\' LIMIT 200`,
+         FROM doc_index WHERE realm_id = ? AND norm_text LIKE ? ESCAPE '\\'
+           AND ${Store.CANDIDATE_FILTER}
+         ORDER BY ref_id LIMIT ${Store.SEARCH_CAP}`,
       )
       .all(realmId, `%${likeEscape(normQuery)}%`) as IndexHit[];
   }
@@ -484,7 +494,9 @@ export class Store {
         .prepare(
           `SELECT d.ref_id, d.ref_type, d.sensitivity, d.scope_state, d.label_ids, d.norm_text
            FROM doc_fts f JOIN doc_index d ON d.ref_id = f.ref_id
-           WHERE f.norm_text MATCH ? AND d.realm_id = ? LIMIT 200`,
+           WHERE f.norm_text MATCH ? AND d.realm_id = ?
+             AND d.${Store.CANDIDATE_FILTER}
+           ORDER BY d.ref_id LIMIT ${Store.SEARCH_CAP}`,
         )
         .all(phrase, realmId) as IndexHit[];
     } catch {
