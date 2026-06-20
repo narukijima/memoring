@@ -22,6 +22,10 @@ built against it — are recorded here.
     and `context build` coexist without reviving Sealed content.
 - **OSS release prep:** MIT `LICENSE`, `SECURITY.md` (threat model + reporting), `CONTRIBUTING.md`,
   and package metadata.
+- **Install robustness (0.1.1):** the `memoring` launcher now prints a clear, actionable error when
+  dependencies are missing instead of exiting silently; README documents the supported Node range
+  (20/22 LTS — the native `better-sqlite3` build can fail on the newest Node, e.g. 26) and the
+  clone-then-`cd` step; added `.nvmrc` (22) and an `engines` upper bound.
 
 ## v1.0 — 2026-06-20
 

@@ -1,6 +1,6 @@
 {
   "name": "memoring",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Sovereign Memory Loop — local-first, user-controlled AI memory asset (v0).",
   "type": "module",
@@ -26,7 +26,7 @@
     "test:watch": "vitest"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20 <25"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",

@@ -24,14 +24,21 @@ v0 is single-user, local-first, source-only (TypeScript run via `tsx`, no build 
 remains frozen: implementation does not change a structural invariant without an ADR (see `AGENTS.md`).
 
 **Versioning.** Two deliberately distinct markers: `VERSION` (`1.0.0`) is the frozen **spec
-baseline**; `package.json` `version` (`0.1.0`) is the **code release**. They version different
+baseline**; `package.json` `version` (`0.1.1`) is the **code release**. They version different
 things and do not need to match.
 
 ## Quick start
 
-Requires Node.js ≥ 20.
+Requires **Node.js 20 or 22 (LTS)**. Node 24 works too; the newest releases (e.g. Node 26) can fail
+to compile the native `better-sqlite3` dependency. If `npm install` errors while building
+better-sqlite3, switch to Node 22 LTS (`nvm install 22 && nvm use 22`) and reinstall.
+
+Run every command below from the cloned repository directory.
 
 ```bash
+git clone https://github.com/narukijima/memoring.git
+cd memoring                      # run every command below from here
+
 npm install                      # if native installs are gated:
                                  #   npm approve-scripts better-sqlite3 esbuild fsevents && npm install
 npm run typecheck && npm test    # optional: verify the build
