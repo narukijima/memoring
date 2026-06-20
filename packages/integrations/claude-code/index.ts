@@ -25,6 +25,17 @@ function claudeProjectsDir(): string {
   return process.env.MEMORING_CLAUDE_DIR ?? path.join(os.homedir(), '.claude', 'projects');
 }
 
+/** Attribute a Claude Code git-worktree cwd to its parent repo. Worktrees live at
+ *  <repo>/.claude/worktrees/<generated-name>; the throwaway generated name must
+ *  not pollute the project vocabulary, and the session's memory belongs to the
+ *  parent repo (which is also the correct root_path for Active-Realm matching). */
+export function normalizeProjectRoot(cwd: string | null): string | null {
+  if (!cwd) return cwd;
+  const marker = '/.claude/worktrees/';
+  const i = cwd.indexOf(marker);
+  return i >= 0 ? cwd.slice(0, i) : cwd;
+}
+
 function readFirstLines(file: string, max = 50): string[] {
   try {
     const content = fs.readFileSync(file, 'utf8');
@@ -73,6 +84,12 @@ function hasToolResult(content: unknown): boolean {
   );
 }
 
+/** Leading markers identifying a host-injected context block delivered on a
+ *  type:'user' line (host system/config injection, §1.3.2 `system`), never a user
+ *  utterance. <system-reminder> = CLAUDE.md / environment / tool guidance;
+ *  <task-notification> = the harness background-task completion event. */
+const HOST_INJECTION_MARKERS = ['<system-reminder>', '<task-notification>'] as const;
+
 function classifyOrigin(line: RawLine, text: string): ParsedMessage['origin'] {
   switch (line.type) {
     case 'assistant':
@@ -84,14 +101,13 @@ function classifyOrigin(line: RawLine, text: string): ParsedMessage['origin'] {
     case 'user':
       if (hasToolResult(line.message?.content)) return 'tool_result';
       if (line.isMeta === true) return 'system';
-      // Host-injected context (CLAUDE.md, environment, tool guidance) is delivered
-      // as a type:'user' line whose content is a <system-reminder> block. It is
-      // host system/config injection (§1.3.2 `system`), NOT a user utterance, and
-      // must never become independent evidence — this closes the host-memory
-      // laundering loop (§4.12 / G8) at the intake boundary. Gate on a leading
-      // marker so a genuine user message that merely quotes the tag is not
-      // over-excluded.
-      if (text.trimStart().startsWith('<system-reminder>')) return 'system';
+      // Host-injected context delivered on a type:'user' line is NOT a user
+      // utterance and must never become independent evidence — gating it closes
+      // the host-memory laundering loop (§4.12 / G8) at the intake boundary. Gate
+      // on a LEADING marker so a genuine user message that merely quotes a tag
+      // mid-text is not over-excluded.
+      const head = text.trimStart();
+      if (HOST_INJECTION_MARKERS.some((m) => head.startsWith(m))) return 'system';
       return 'user';
     default:
       return 'unknown';
@@ -186,7 +202,7 @@ export const claudeCodeConnector: Connector = {
           source_stable_id: stableId,
           connector_id: this.id,
           source_type: 'append',
-          project_root: cwd,
+          project_root: normalizeProjectRoot(cwd),
           git_remote: null,
           account: null,
           transcript_path: transcriptPath,
