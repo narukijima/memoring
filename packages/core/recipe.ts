@@ -123,6 +123,10 @@ export const TOKEN_BUDGET_RECIPE = {
     large_chat_session: 16000,
     deep_research_context: 32000,
   } as Record<ContextPurpose, number>,
+  /** Max claims rendered per context.md section (top-ranked kept; rest omitted
+   *  with a count). A density ceiling so a rich corpus stays a usable primer —
+   *  a versioned tunable (CON-016/017), raise it for a fuller dump. */
+  max_items_per_section: 15,
   allocation: {
     safety_header_scope: 0.1,
     constraints: 0.15,
