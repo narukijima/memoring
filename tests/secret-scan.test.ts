@@ -10,8 +10,23 @@ describe('Secret Scan (G3 / CON-007)', () => {
     expect(scanText('password: "hunter2hunter2"').detected).toBe(true);
   });
 
+  it('detects credential shapes that previously slipped through (fail-open closed)', () => {
+    // Underscore-prefixed SaaS keys (the sk- rule required a hyphen).
+    expect(scanText(`STRIPE_SECRET=sk_live_${'A'.repeat(24)}`).detected).toBe(true);
+    expect(scanText('key rk_test_0123456789ABCDEFGHIJ').detected).toBe(true);
+    // Unquoted secret assignments (the generic rule required quotes).
+    expect(scanText('password=hunter2hunter2longenough').detected).toBe(true);
+    // Connection-string userinfo passwords.
+    expect(scanText('DATABASE_URL=postgres://admin:SuperSecret123@db.example.com/app').detected).toBe(true);
+    // GitLab / Slack-app tokens.
+    expect(scanText('glpat-ABCDEFGHIJKLMNOPQRST in ci').detected).toBe(true);
+    expect(scanText('xapp-1-ABCDEFGHIJ-0987654321').detected).toBe(true);
+  });
+
   it('passes clean text without detection', () => {
     expect(scanText('I prefer 2-space indentation.').detected).toBe(false);
+    expect(scanText('we will use postgres://localhost/dev for local work').detected).toBe(false);
+    expect(scanText('the password field is required on the form').detected).toBe(false);
   });
 
   it('records a passed scan with secret_scan_passed=true when clean', () => {

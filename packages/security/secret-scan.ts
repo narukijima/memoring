@@ -13,20 +13,31 @@ interface SecretRule {
   re: RegExp;
 }
 
-// High-signal credential patterns. Conservative on purpose: false positives only
-// cost recall (the event is dropped from context), which v0 accepts.
+// High-signal credential patterns. Conservative on purpose, but note the
+// asymmetry: a false POSITIVE only costs recall (the event is dropped from
+// context). A false NEGATIVE fails OPEN — on a project with an explicit
+// default_sensitivity=public|internal, a missed secret is raised to that class
+// and indexed/egressed (§4.11 floor `contains_secret_span ⇒ secret`). So gaps
+// here cost confidentiality, not recall; prefer over-matching credential shapes.
 const RULES: SecretRule[] = [
   { id: 'pem_private_key', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/ },
   { id: 'aws_access_key', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
   { id: 'aws_secret_key', re: /\baws_secret_access_key\b\s*[:=]\s*['"]?[A-Za-z0-9/+]{40}\b/i },
   { id: 'openai_key', re: /\bsk-[A-Za-z0-9]{20,}\b/ },
   { id: 'anthropic_key', re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/ },
+  // Underscore-prefixed SaaS keys (Stripe sk_live_/sk_test_/rk_live_, etc.).
+  { id: 'underscore_secret_key', re: /\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}\b/ },
   { id: 'github_token', re: /\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b/ },
+  { id: 'gitlab_token', re: /\bglpat-[A-Za-z0-9_-]{20,}\b/ },
   { id: 'slack_token', re: /\bxox[abposr]-[A-Za-z0-9-]{10,}\b/ },
+  { id: 'slack_app_token', re: /\bxapp-[A-Za-z0-9-]{10,}\b/ },
   { id: 'google_api_key', re: /\bAIza[0-9A-Za-z_-]{35}\b/ },
   { id: 'jwt', re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/ },
   { id: 'bearer_token', re: /\bBearer\s+[A-Za-z0-9._-]{20,}\b/ },
-  { id: 'generic_secret_assign', re: /\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|private[_-]?key)\b\s*[:=]\s*['"][^'"\n]{8,}['"]/i },
+  // URL userinfo password: scheme://user:password@host (postgres://, redis://, …).
+  { id: 'connection_string', re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]{6,}@/i },
+  // Secret assignment — quoted (>=8) OR unquoted high-entropy value (>=12 chars).
+  { id: 'generic_secret_assign', re: /\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|private[_-]?key)\b\s*[:=]\s*(?:['"][^'"\n]{8,}['"]|[^\s'"]{12,})/i },
 ];
 
 export interface ScanOutcome {
