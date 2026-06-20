@@ -16,10 +16,35 @@ substrate; the product value is the loop that keeps growing history into usable 
 
 ## Status
 
-**Frozen — Spec Baseline v1.0 (2026-06-20).**
+**Spec Baseline v1.0 frozen (2026-06-20) · v0 implemented.**
 
-This repository is the canonical, frozen specification baseline that implementation works against.
-No implementation code lives here yet — building it is a separate, later phase (see `AGENTS.md`).
+The seven design documents are the canonical, frozen specification (`docs/v0/`). The v0
+implementation (CLI + local daemon) is built against them and lives in `apps/` and `packages/`.
+v0 is single-user, local-first, source-only (TypeScript run via `tsx`, no build step). The spec
+remains frozen: implementation does not change a structural invariant without an ADR (see `AGENTS.md`).
+
+## Quick start
+
+Requires Node.js ≥ 20.
+
+```bash
+npm install                      # if native installs are gated:
+                                 #   npm approve-scripts better-sqlite3 esbuild fsevents && npm install
+npm run typecheck && npm test    # optional: verify the build
+
+# Create an encrypted local replica (generates a passphrase + recovery code — keep both):
+node bin/memoring.mjs init
+
+# Discover and connect your Claude Code history, choosing a sensitivity policy, then backfill:
+node bin/memoring.mjs connect claude-code --all --backfill --default-sensitivity internal
+
+# From inside a project, hand safe context to your next AI session (the main exit):
+node bin/memoring.mjs context build          # writes .memoring/context.md through the Gate
+```
+
+Safety model in one line: every output passes a single **Gate** (Audience × Aperture) before
+ranking; secret / unknown / out-of-scope / unclassified content is never emitted; deletions and
+Seals are durable across reprocessing. See the Specification (§7.3 egress table) and `SECURITY.md`.
 
 ## Document map
 
@@ -61,4 +86,4 @@ Read on its own track (the "why" and the market framing):
 
 ## License
 
-TBD.
+[MIT](LICENSE) © The Memoring Authors. See `SECURITY.md` for the threat model and how to report vulnerabilities.
