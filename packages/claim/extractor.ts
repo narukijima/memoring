@@ -10,7 +10,11 @@ import { hmacHex } from '@security/crypto-primitives';
 import { isIndependentEvidenceOrigin, maxSensitivityOf, type Sensitivity } from '@core/schema/enums';
 import { allowedSensitivity, allowedSensitivityState } from '@core/policy';
 import type { Claim, Derivation, MemEvent } from '@core/schema/entities';
-import type { MemoryProvider } from './provider';
+import type { AbstractInput, MemoryProvider } from './provider';
+
+/** Events per provider.abstract() call. An LLM round-trip costs ~the same for 1
+ *  or N inputs, so batching cuts API calls ~N×; Mode A is unaffected by size. */
+const ABSTRACT_BATCH_SIZE = 20;
 
 function readText(ctx: RealmContext, event: MemEvent): string | null {
   if (!event.text_ref) return null;
@@ -61,16 +65,15 @@ export async function abstractEvents(
   const newCandidates: Claim[] = [];
   let merged = 0;
 
+  // Filter to eligible events and read their text once. Only user-origin events
+  // (independent evidence; never context_injected assistant text, Ouroboros) feed
+  // abstraction. The remote pre-egress gate withholds anything the output Gate
+  // would block (secret / unknown / unconfirmed-confidential / candidate-state),
+  // so a `remote` provider never receives raw text the Gate forbids.
+  const eligible: { event: MemEvent; input: AbstractInput }[] = [];
   for (const event of events) {
-    // Only events whose origin can be INDEPENDENT evidence feed abstraction, and
-    // never context_injected assistant text (Ouroboros). user-origin text in a
-    // context_injected session is still external_observation, hence allowed.
     if (!isIndependentEvidenceOrigin(event.origin)) continue;
     if (event.origin !== 'user') continue; // v0 heuristics target explicit user statements
-    // Pre-egress gate: a `remote` provider sends raw Event text off-device, which
-    // the output Gate never sees. Forward only events that clear the SAME
-    // sensitivity predicate the Gate uses for remote_ai_processing — so secret /
-    // unknown / unconfirmed-confidential text is never exfiltrated to a model.
     if (
       provider.egress === 'remote' &&
       (!allowedSensitivity(event.sensitivity, 'remote_ai_processing', 'standard') ||
@@ -80,19 +83,19 @@ export async function abstractEvents(
     }
     const text = readText(ctx, event);
     if (!text) continue;
+    eligible.push({ event, input: { text, origin: event.origin, role: event.role } });
+  }
 
-    const candidates = await provider.abstract([{ text, origin: event.origin, role: event.role }]);
-    if (candidates.length === 0) continue;
-
-    const assignmentIds = ctx.store
-      .listAssignmentsForTarget('event', event.event_id)
-      .map((a) => a.assignment_id);
-    const projectIds = ctx.store
-      .listAssignmentsForTarget('event', event.event_id)
-      .flatMap((a) => a.project_ids);
-    const evidenceSensitivity: Sensitivity = maxSensitivityOf([event.sensitivity]);
+  // Abstract in batches; each candidate names the input event it came from.
+  for (let start = 0; start < eligible.length; start += ABSTRACT_BATCH_SIZE) {
+    const batch = eligible.slice(start, start + ABSTRACT_BATCH_SIZE);
+    const candidates = await provider.abstract(batch.map((b) => b.input));
 
     for (const cand of candidates) {
+      const src = batch[cand.sourceIndex];
+      if (!src) continue; // candidate cites an out-of-range turn → cannot attribute, drop
+      const event = src.event;
+      const evidenceSensitivity: Sensitivity = maxSensitivityOf([event.sensitivity]);
       const key = claimKey(cand.kind, cand.statement);
       const keyHash = hmacHex(ctx.realmKey, key);
       const existingId = ctx.store.getMeta(`claimkey:${keyHash}`);
@@ -114,6 +117,7 @@ export async function abstractEvents(
         continue;
       }
 
+      const assignments = ctx.store.listAssignmentsForTarget('event', event.event_id);
       const derivation = recordDerivation(ctx, provider, event, now);
       const statementRef = ctx.objects.put(
         `${newId('claim', now.getTime())}_stmt`,
@@ -125,8 +129,8 @@ export async function abstractEvents(
         kind: cand.kind,
         statement_ref: statementRef,
         structured_predicate_ref: null,
-        assignment_ids: assignmentIds,
-        project_ids: [...new Set(projectIds)],
+        assignment_ids: assignments.map((a) => a.assignment_id),
+        project_ids: [...new Set(assignments.flatMap((a) => a.project_ids))],
         abstraction_level: cand.kind === 'preference' || cand.kind === 'constraint' ? 4 : 2,
         status: 'candidate',
         conflict_reason: null,
