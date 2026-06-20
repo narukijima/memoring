@@ -20,6 +20,9 @@ export interface OpenAiCompatibleOptions {
   fetchImpl?: typeof fetch;
   /** Display id (e.g. 'openai', 'deepseek'); defaults to 'openai_compatible'. */
   id?: string;
+  /** Per-request timeout (ms), default 120000. A hung call fails fast so the
+   *  caller's batch-level catch can skip it and continue. */
+  timeoutMs?: number;
 }
 
 function isLoopback(baseURL: string): boolean {
@@ -42,6 +45,7 @@ export class OpenAiCompatibleBackend implements LlmBackend {
   private readonly baseURL: string;
   private readonly apiKey?: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
 
   constructor(opts: OpenAiCompatibleOptions) {
     this.baseURL = opts.baseURL.replace(/\/+$/, '');
@@ -50,25 +54,33 @@ export class OpenAiCompatibleBackend implements LlmBackend {
     this.egress = opts.egress ?? (isLoopback(opts.baseURL) ? 'local' : 'remote');
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.id = opts.id ?? 'openai_compatible';
+    this.timeoutMs = opts.timeoutMs ?? 120_000;
   }
 
   async complete(prompt: string): Promise<string> {
-    const res = await this.fetchImpl(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model: this.model,
-        temperature: 0, // deterministic extraction; pin output for reproducibility
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-    if (!res.ok) {
-      throw new Error(`LLM backend ${this.id} returned HTTP ${res.status}`);
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), this.timeoutMs);
+    try {
+      const res = await this.fetchImpl(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model: this.model,
+          temperature: 0, // deterministic extraction; pin output for reproducibility
+          messages: [{ role: 'user', content: prompt }],
+        }),
+        signal: ac.signal,
+      });
+      if (!res.ok) {
+        throw new Error(`LLM backend ${this.id} returned HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as ChatCompletionResponse;
+      return data.choices?.[0]?.message?.content ?? '';
+    } finally {
+      clearTimeout(timer);
     }
-    const data = (await res.json()) as ChatCompletionResponse;
-    return data.choices?.[0]?.message?.content ?? '';
   }
 }
