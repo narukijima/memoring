@@ -12,6 +12,7 @@ import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { resolveActiveProjects } from '@core/realm';
 import { TOKEN_BUDGET_RECIPE, type ContextPurpose } from '@core/recipe';
+import { log } from '@core/log';
 import { readClaimStatement } from '@claim/extractor';
 import { isClaimSuppressed } from '@claim/seal';
 import type { Aperture, Audience, ClassificationState } from '@core/schema/enums';
@@ -303,27 +304,58 @@ function renderMarkdown(
   return lines.join('\n');
 }
 
-/** File safety (Specification §3.5, gate 7). */
+/**
+ * File safety (Specification §3.5, gate 7). Canonically resolve the output path
+ * and refuse if ANY existing component from the (canonicalized) project root
+ * down to the target dir is a symlink — not just the immediate parent. This
+ * closes the nested --out bypass (e.g. .memoring is a symlink and an
+ * intermediate dir does not yet exist). Writing outside the repo is a warn
+ * (refuse-or-warn per §3.5); the symlink refusal is the hard rule.
+ */
 export function writeContextFileSafely(outPath: string, content: string, cwd: string): void {
-  const resolvedOut = path.resolve(cwd, outPath);
-  const dir = path.dirname(resolvedOut);
+  // Canonicalize cwd so legitimate system-prefix symlinks (e.g. /tmp → /private/tmp
+  // on macOS) are normalized away before we walk *below* it.
+  const realCwd = fs.existsSync(cwd) ? fs.realpathSync(cwd) : path.resolve(cwd);
+  const resolvedOut = path.resolve(realCwd, outPath);
+  const targetDir = path.dirname(resolvedOut);
 
-  // Refuse if .memoring is a symlink (anywhere along the final component).
-  const memoringDir = dir;
-  if (fs.existsSync(memoringDir)) {
-    const lst = fs.lstatSync(memoringDir);
-    if (lst.isSymbolicLink()) {
-      throw new Error(`Refusing to write: ${memoringDir} is a symlink.`);
-    }
+  const rel = path.relative(realCwd, targetDir);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    // Output destination is outside the project: warn (do not symlink-walk the
+    // user's wider filesystem, which may contain legitimate prefix symlinks).
+    log.warn('context:out_outside_repo', { components: rel.split(path.sep).length });
+  } else {
+    refuseIfSymlinkInChain(realCwd, targetDir);
   }
-  ensureDir(memoringDir, 0o700);
+
+  ensureDir(targetDir, 0o700);
   atomicWriteFile(resolvedOut, content, 0o600);
 
   // Add .memoring/ to .git/info/exclude (never rewrite .gitignore).
   try {
-    addToGitExclude(cwd);
+    addToGitExclude(realCwd);
   } catch {
     /* best-effort */
+  }
+}
+
+/** Refuse if any existing path component strictly under `base` (down to and
+ *  including `targetDir`) is a symbolic link. */
+function refuseIfSymlinkInChain(base: string, targetDir: string): void {
+  const rel = path.relative(base, targetDir);
+  if (rel === '') return;
+  let cur = base;
+  for (const part of rel.split(path.sep)) {
+    cur = path.join(cur, part);
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(cur); // lstat does NOT follow links — catches dangling symlinks too
+    } catch {
+      break; // component truly absent → no descendant can exist yet
+    }
+    if (st.isSymbolicLink()) {
+      throw new Error(`Refusing to write: ${cur} is a symlink (file safety).`);
+    }
   }
 }
 

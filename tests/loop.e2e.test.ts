@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { newId } from '@core/schema/ids';
@@ -11,21 +12,25 @@ import { sourceIdentity } from '@intake/identity';
 import type { ConnectorInstance, Project, Source } from '@core/schema/entities';
 import { makeTempRealm, type TempRealm } from './helpers';
 
-const PROJECT_ROOT = '/tmp/memoring-proj';
+// The fixture transcript records cwd=/tmp/memoring-proj; classify keys scope off
+// the registered project, not this path, so the e2e project root is an
+// independent temp dir used as the build CWD + output location.
 const fixturesProjects = fileURLToPath(new URL('../fixtures/claude-code/projects', import.meta.url));
 
 let realm: TempRealm;
+let projectRoot: string;
 let prevClaudeDir: string | undefined;
 
 beforeEach(() => {
   prevClaudeDir = process.env.MEMORING_CLAUDE_DIR;
   process.env.MEMORING_CLAUDE_DIR = fixturesProjects;
+  projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'memoring-proj-'));
   realm = makeTempRealm({
     projects: [
       {
         project_id: 'proj_test',
         name: 'memoring-proj',
-        root_paths: [PROJECT_ROOT],
+        root_paths: [projectRoot],
         git_remotes: [],
         default_sensitivity: 'internal',
       },
@@ -34,6 +39,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   realm.cleanup();
+  fs.rmSync(projectRoot, { recursive: true, force: true });
   if (prevClaudeDir === undefined) delete process.env.MEMORING_CLAUDE_DIR;
   else process.env.MEMORING_CLAUDE_DIR = prevClaudeDir;
 });
@@ -94,10 +100,9 @@ describe('loop end-to-end (gates 1–8, 11–13)', () => {
   it('builds a context.md that emits the 3 claims and never the secret or assistant text', async () => {
     await wireConnector();
     await runLoop(realm.ctx, { method: 'backfill' });
-    const out = path.join(realm.root, 'out', 'context.md');
     const result = buildContext(realm.ctx, {
-      cwd: PROJECT_ROOT,
-      outPath: out,
+      cwd: projectRoot,
+      outPath: path.join('.memoring', 'context.md'),
       aperture: 'standard',
       audience: 'ai_tool',
     });
@@ -105,7 +110,7 @@ describe('loop end-to-end (gates 1–8, 11–13)', () => {
     if (result.kind !== 'written') return;
     expect(result.emitted).toBe(3);
 
-    const doc = fs.readFileSync(out, 'utf8');
+    const doc = fs.readFileSync(path.join(projectRoot, '.memoring', 'context.md'), 'utf8');
     expect(doc).toContain('Always use TypeScript strict mode'); // constraint
     expect(doc).toContain('better-sqlite3'); // decision
     expect(doc).toContain('2-space indentation'); // preference
