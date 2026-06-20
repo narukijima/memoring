@@ -40,43 +40,47 @@ function printStats(stats: LoopStats): void {
 }
 
 export async function cmdWatch(argv: string[]): Promise<number> {
-  const flags = parseFlags(argv);
-  const idleTimeoutMs = (Number(flags['idle-timeout']) || 900) * 1000; // default 15 min
+  parseFlags(argv);
   const debounceMs = 600;
 
   const passphrase = await getPassphrase();
   const root = replicaLayout().root;
-  let ctx: RealmContext | null = openRealm(passphrase, root);
-  if (ctx.config.connectors.length === 0) {
+
+  // The daemon holds the replica lock ONLY for the duration of a tick (open →
+  // loop → close), never continuously. This keeps context build / search /
+  // governance usable while watching (they only contend during the brief tick
+  // window, and the lock acquire retries across it), and each tick re-reads the
+  // latest blob so a concurrent CLI write is never clobbered. The DEK is
+  // re-derived from the held passphrase per tick and disposed immediately after,
+  // minimizing key residency (§7.4) more strongly than an idle timer.
+  const withRealm = async <T>(fn: (ctx: RealmContext) => Promise<T> | T): Promise<T> => {
+    const ctx = openRealm(passphrase, root); // re-derive DEK from the held passphrase
+    try {
+      return await fn(ctx);
+    } finally {
+      ctx.close(true); // flush + release lock + dispose key material
+    }
+  };
+
+  if (!(await withRealm((ctx) => ctx.config.connectors.length > 0))) {
     console.log('  No connectors configured. Run `memoring connect claude-code` first.');
-    ctx.close(false);
     return 0;
   }
 
-  const ensureOpen = (): RealmContext => {
-    if (!ctx) {
-      ctx = openRealm(passphrase, root); // re-derive DEK from the held passphrase
-      log.info('watch:reunlocked', {});
-    }
-    return ctx;
-  };
-
   // Catch-up pass.
-  printStats(await runLoop(ensureOpen(), { method: 'watch' }));
+  printStats(await withRealm((ctx) => runLoop(ctx, { method: 'watch' })));
 
-  const roots = await watchRoots(ensureOpen());
+  const roots = await withRealm((ctx) => watchRoots(ctx));
   console.log(`  Watching ${roots.length} location(s) for selected sources. Ctrl-C to stop.`);
 
   let debounce: ReturnType<typeof setTimeout> | null = null;
-  let lastActivity = Date.now();
   let running = false;
 
   const tick = async (): Promise<void> => {
     if (running) return;
     running = true;
     try {
-      lastActivity = Date.now();
-      printStats(await runLoop(ensureOpen(), { method: 'watch' }));
+      printStats(await withRealm((ctx) => runLoop(ctx, { method: 'watch' })));
     } catch (e) {
       log.error('watch:loop_error', { msg: (e as Error).message });
     } finally {
@@ -97,21 +101,10 @@ export async function cmdWatch(argv: string[]): Promise<number> {
     }
   });
 
-  // Idle key-discard: drop the DEK after inactivity; re-unlock lazily on next diff.
-  const idleTimer = setInterval(() => {
-    if (ctx && !running && Date.now() - lastActivity > idleTimeoutMs) {
-      ctx.close(true); // flush + dispose key material
-      ctx = null;
-      log.info('watch:idle_locked', {});
-    }
-  }, Math.min(idleTimeoutMs, 60_000));
-
   await new Promise<void>((resolve) => {
     const shutdown = (): void => {
-      clearInterval(idleTimer);
       if (debounce) clearTimeout(debounce);
       for (const w of watchers) w.close();
-      if (ctx) ctx.close(true);
       console.log('\n  Stopped.');
       resolve();
     };

@@ -25,7 +25,7 @@ Usage:
       --default-sensitivity <s>          public|internal|confidential (project policy; default internal).
       --backfill                         Run the loop after connecting.
   memoring backfill                      Ingest history from registered sources (runs the loop).
-  memoring watch [--idle-timeout <s>]    Resident diff-driven loop; idle discards the key.
+  memoring watch                         Resident diff-driven loop; holds the key/lock only per diff.
   memoring context build [opts]          Generate .memoring/context.md through the Gate (main exit).
       --out <path>                       Default .memoring/context.md
       --aperture strict|standard|permissive   Default standard.

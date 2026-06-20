@@ -54,10 +54,28 @@ function pidIsAlive(pid: number): boolean {
   }
 }
 
+const LOCK_RETRY_INTERVAL_MS = 100;
+const DEFAULT_LOCK_MAX_WAIT_MS = 2000;
+
+/** How long to wait through transient lock contention (e.g. a daemon mid-tick)
+ *  before failing closed. Tunable for slow/networked disks and for tests. */
+function lockMaxWaitMs(): number {
+  const env = process.env.MEMORING_LOCK_MAX_WAIT_MS;
+  if (env === undefined) return DEFAULT_LOCK_MAX_WAIT_MS;
+  const n = Number(env);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_LOCK_MAX_WAIT_MS;
+}
+
+/** Block briefly without busy-spin (so brief lock contention waits, not fails). */
+function syncSleep(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function acquireReplicaLock(blobPath: string): ReplicaLock {
   const lockPath = `${blobPath}.lock`;
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
   const token = randomUUID();
+  const deadline = Date.now() + lockMaxWaitMs();
   for (;;) {
     try {
       const fd = fs.openSync(lockPath, 'wx', 0o600);
@@ -70,12 +88,15 @@ function acquireReplicaLock(blobPath: string): ReplicaLock {
       if (owner?.pid && !pidIsAlive(owner.pid)) {
         try {
           fs.unlinkSync(lockPath);
-          continue;
+          continue; // stale lock cleared → retry immediately
         } catch {
-          throw new ReplicaLockError(lockPath, owner);
+          /* lost the unlink race → fall through to wait/retry */
         }
       }
-      throw new ReplicaLockError(lockPath, owner);
+      // Live owner (e.g. the daemon mid-tick): wait briefly and retry, then fail
+      // closed — so a context build that races a tick waits instead of erroring.
+      if (Date.now() >= deadline) throw new ReplicaLockError(lockPath, owner);
+      syncSleep(LOCK_RETRY_INTERVAL_MS);
     }
   }
 }
