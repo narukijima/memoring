@@ -128,6 +128,14 @@ describe('delete / redact cascade (G10 / §7.3)', () => {
     expect(ctx.store.countTombstones(ctx.realmId)).toBeGreaterThan(0);
   });
 
+  it('deleteUndiluted reports found=false for a missing id (honest not-found, no false success)', () => {
+    const ctx = seeded.realm.ctx;
+    expect(deleteUndiluted(ctx, 'und_does_not_exist', { seal: false }).found).toBe(false);
+    const real = ctx.store.listEvents(ctx.realmId)[0]!;
+    const occ = ctx.store.getOccurrence(real.occurrence_ids[0]!)!;
+    expect(deleteUndiluted(ctx, occ.undiluted_id, { seal: false }).found).toBe(true);
+  });
+
   it('prunes tombstoned occurrence_ids from Claim.evidence_occurrence_ids (FR-068)', () => {
     const ctx = seeded.realm.ctx;
     const decision = consolidatedByKind('decision');

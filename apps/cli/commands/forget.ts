@@ -52,7 +52,7 @@ export async function cmdForget(argv: string[]): Promise<number> {
   const ok = await withRealm((ctx) => {
     if (id.startsWith('clm_')) return forgetClaim(ctx, id, { seal: true });
     if (id.startsWith('evt_')) return redactEventById(ctx, id, { seal: true });
-    if (id.startsWith('und_')) return deleteUndiluted(ctx, id, { seal: true }).events >= 0;
+    if (id.startsWith('und_')) return deleteUndiluted(ctx, id, { seal: true }).found;
     return false;
   });
   console.log(ok ? `  Forgot ${id} (sealed).` : `  Not found: ${id}`);
@@ -68,7 +68,7 @@ export async function cmdDelete(argv: string[]): Promise<number> {
   }
   if (!(await confirm(flags, `delete ${id} and cascade`))) return 1;
   const ok = await withRealm((ctx) => {
-    if (id.startsWith('und_')) return deleteUndiluted(ctx, id, { seal: false }).events >= 0;
+    if (id.startsWith('und_')) return deleteUndiluted(ctx, id, { seal: false }).found;
     if (id.startsWith('evt_')) return redactEventById(ctx, id, { seal: false });
     if (id.startsWith('clm_')) return forgetClaim(ctx, id, { seal: false });
     return false;

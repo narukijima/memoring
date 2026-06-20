@@ -105,9 +105,9 @@ export function deleteUndiluted(
   undilutedId: string,
   opts: { seal?: boolean } = {},
   now = new Date(),
-): { events: number; claims: number } {
+): { found: boolean; events: number; claims: number } {
   const u = ctx.store.getUndiluted(undilutedId);
-  if (!u) return { events: 0, claims: 0 };
+  if (!u) return { found: false, events: 0, claims: 0 };
 
   try {
     ctx.objects.delete(u.encrypted_payload_ref);
@@ -138,7 +138,7 @@ export function deleteUndiluted(
   }
   ctx.chronicler.append('delete', undilutedId, now);
   ctx.audit('delete', { undiluted_id: undilutedId, events, claims: before.size, sealed: opts.seal === true }, now);
-  return { events, claims: before.size };
+  return { found: true, events, claims: before.size };
 }
 
 /** forget a Claim: redact it and (by default) Seal it so it cannot revive. */
