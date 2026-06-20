@@ -35,7 +35,9 @@ const RULES: SecretRule[] = [
   { id: 'jwt', re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/ },
   { id: 'bearer_token', re: /\bBearer\s+[A-Za-z0-9._-]{20,}\b/ },
   // URL userinfo password: scheme://user:password@host (postgres://, redis://, …).
-  { id: 'connection_string', re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]{6,}@/i },
+  // The scheme atom is length-bounded (schemes are short) so a long dotted token
+  // that never reaches "://" cannot trigger quadratic backtracking (ReDoS).
+  { id: 'connection_string', re: /\b[a-z][a-z0-9+.-]{0,32}:\/\/[^\s:@/]+:[^\s:@/]{6,}@/i },
   // Secret assignment — quoted (>=8) OR unquoted high-entropy value (>=12 chars).
   { id: 'generic_secret_assign', re: /\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|private[_-]?key)\b\s*[:=]\s*(?:['"][^'"\n]{8,}['"]|[^\s'"]{12,})/i },
 ];

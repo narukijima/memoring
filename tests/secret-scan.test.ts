@@ -42,6 +42,15 @@ describe('Secret Scan (G3 / CON-007)', () => {
     expect(r.secret_scan_passed).toBe(true); // scan completed; sensitivity is forced secret upstream
   });
 
+  it('scans a long dotted token in linear time (no connection_string ReDoS)', () => {
+    // A pasted dependency tree / dotted class dump with no "://" must not trigger
+    // quadratic backtracking in the connection_string rule.
+    const huge = 'redis' + '.child'.repeat(11000); // ~66k chars, no scheme separator
+    const start = performance.now();
+    expect(scanText(huge).detected).toBe(false);
+    expect(performance.now() - start).toBeLessThan(250); // linear ~1ms; quadratic would be ~1s
+  });
+
   it('null text is a completed scan with nothing to flag', () => {
     const r = runSecretScan('evt_1', null);
     expect(r.secret_scan_passed).toBe(true);
