@@ -1,13 +1,15 @@
 // `memoring export --purpose backup <dest>` — backup_export (FR-074/075). A
-// full-text, same-user, client-side-encrypted copy of the Realm. Because the
-// at-rest representation is already AEAD-encrypted (DB blob + objects, wrapped
-// key bundle), a faithful directory copy keeps plaintext inside the key boundary
-// while including secret/unknown (note4, §7.3). redacted/dataset export are
-// derivatives that may leave the key boundary — v0 fixes only their constraints.
+// full-text, same-user copy of the Realm (incl. secret/unknown, note4 §7.3). The
+// at-rest files are AEAD-encrypted (DB blob + objects). In passphrase mode only
+// the scrypt-wrapped key bundle is copied, so the backup stays sealed; in the
+// default passwordless mode the copy also includes the unwrapped local key, so
+// the backup is self-decrypting (the manifest and console say so honestly).
+// redacted/dataset export are derivatives that may leave the key boundary — v0
+// fixes only their constraints.
 import fs from 'node:fs';
 import path from 'node:path';
 import { replicaLayout } from '@core/paths';
-import { openRealm } from '@core/runtime';
+import { isPassphraseMode, openActiveRealm } from '@core/runtime';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 
@@ -30,8 +32,7 @@ export async function cmdExport(argv: string[]): Promise<number> {
   }
 
   // Flush any pending state into the encrypted blob, then copy the replica.
-  const passphrase = await getPassphrase();
-  const ctx = openRealm(passphrase, replicaLayout().root);
+  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
   let realmId = '';
   let claims = 0;
   try {
@@ -44,13 +45,17 @@ export async function cmdExport(argv: string[]): Promise<number> {
   }
 
   const layout = replicaLayout();
+  // Passphrase mode copies only the scrypt-wrapped bundle → the backup stays
+  // sealed. Default (passwordless) mode also copies the unwrapped local key
+  // (keys/key.json), so the backup is self-decrypting — report that honestly
+  // instead of claiming it stays sealed.
+  const sealed = isPassphraseMode(layout.root);
   const target = path.resolve(process.cwd(), dest);
   if (fs.existsSync(target) && fs.readdirSync(target).length > 0) {
     console.error(`  Destination ${target} is not empty. Refusing to overwrite.`);
     return 1;
   }
   fs.mkdirSync(target, { recursive: true, mode: 0o700 });
-  // Encrypted-at-rest files only; nothing here is plaintext content.
   fs.cpSync(layout.root, target, { recursive: true });
 
   const manifest = {
@@ -59,13 +64,21 @@ export async function cmdExport(argv: string[]): Promise<number> {
     realm_id: realmId,
     claims,
     same_user: true,
-    encryption: 'client_side',
-    note: 'Full encrypted copy incl. secret/unknown. Decrypts only with the original passphrase or recovery code.',
+    self_decrypting: !sealed,
+    encryption: sealed ? 'passphrase' : 'local_key_included',
+    note: sealed
+      ? 'Sealed copy (incl. secret/unknown). Decrypts only with the original passphrase or recovery code.'
+      : 'Includes the unwrapped local key (keys/key.json); this backup is self-decrypting. Anyone who obtains it can open the vault — keep it private.',
     created_at: new Date().toISOString(),
   };
   fs.writeFileSync(path.join(target, 'backup-manifest.json'), JSON.stringify(manifest, null, 2), { mode: 0o600 });
 
   console.log(`  backup_export → ${target}`);
-  console.log('  Encrypted copy (incl. secret/unknown). Carry it anywhere; it stays sealed without your key.');
+  if (sealed) {
+    console.log('  Sealed copy (incl. secret/unknown). It stays sealed without your passphrase or recovery code.');
+  } else {
+    console.log('  This backup includes your local key (keys/key.json) and is self-decrypting —');
+    console.log('  anyone who obtains it can open your vault. Keep it private.');
+  }
   return 0;
 }

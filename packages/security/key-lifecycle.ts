@@ -163,3 +163,53 @@ export function unlockWithRecovery(bundle: KeyBundle, recoveryCode: string): Key
   realmRootSecret.fill(0);
   return new Keyring(dek, realmKey, bundle.dek_id);
 }
+
+// ── Passwordless local-key mode (default) ───────────────────────────────────
+// The vault stays AEAD(DEK)-encrypted, but the DEK + root secret are stored
+// UNWRAPPED in a 0600 local key file instead of being scrypt-wrapped behind a
+// passphrase. Goal: no password to forget. This is NOT strong at-rest crypto —
+// anyone who can read the key file can open the vault — but it avoids plaintext
+// SQLite/WAL and protects against leaking the vault blob alone. Derivation is
+// identical to the passphrase path, so a later `--passphrase` upgrade can reuse
+// the same DEK + root. See docs/adr/0001-passwordless-default.md.
+export const LOCAL_KEY_FORMAT = 'memoring-key-v0';
+
+export interface LocalKeyFile {
+  format: typeof LOCAL_KEY_FORMAT;
+  dek_id: string;
+  dek: string; // base64 raw DEK (local key file, 0600, only)
+  root_secret: string; // base64 raw root secret R (realm_key derives from this)
+  created_at: string;
+}
+
+/** init (default mode): generate an unwrapped local key (no passphrase, no recovery code). */
+export function createLocalKeyMaterial(now = new Date()): { keyFile: LocalKeyFile; keyring: Keyring } {
+  const dek = randomSecret();
+  const root = randomSecret();
+  const realmRootSecret = hkdf(root, ROOT_INFO);
+  const realmKey = hkdf(realmRootSecret, REALM_KEY_INFO);
+  const dekId = newId('source');
+  const keyFile: LocalKeyFile = {
+    format: LOCAL_KEY_FORMAT,
+    dek_id: dekId,
+    dek: dek.toString('base64'),
+    root_secret: root.toString('base64'),
+    created_at: now.toISOString(),
+  };
+  root.fill(0);
+  realmRootSecret.fill(0);
+  return { keyFile, keyring: new Keyring(dek, realmKey, dekId) };
+}
+
+export function unlockFromLocalKey(keyFile: LocalKeyFile): Keyring {
+  if (keyFile.format !== LOCAL_KEY_FORMAT) {
+    throw new Error(`Unsupported local key format: ${String(keyFile.format)}`);
+  }
+  const root = Buffer.from(keyFile.root_secret, 'base64');
+  const dek = Buffer.from(keyFile.dek, 'base64');
+  const realmRootSecret = hkdf(root, ROOT_INFO);
+  const realmKey = hkdf(realmRootSecret, REALM_KEY_INFO);
+  root.fill(0);
+  realmRootSecret.fill(0);
+  return new Keyring(dek, realmKey, keyFile.dek_id);
+}

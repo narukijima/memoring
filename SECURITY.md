@@ -17,12 +17,22 @@ user-controlled, encrypted-at-rest memory asset and hands it back only through a
 This summarizes the threat model in the Detailed Design (§7.5). It is the contract; the design docs
 are authoritative.
 
+**Key modes.** By default a replica is **passwordless**: the vault stays AEAD-encrypted, but
+the key is stored unwrapped in a local key file (`keys/key.json`, `0600`). This is *local convenience
+protection* — it avoids plaintext SQLite/WAL and protects the vault blob alone, but not against
+anyone who can read your home directory. `memoring init --passphrase` opts into a strong
+scrypt-wrapped vault with a one-time recovery code (lose both and the data is unrecoverable). The
+"Defended" items below that depend on the at-rest key being unavailable to a disk reader
+(lost/stolen disk, cloud/backup operator) hold **only in `--passphrase` mode**; in default mode use
+full-disk encryption for that property. See [docs/adr/0001-passwordless-default.md](docs/adr/0001-passwordless-default.md).
+
 **Defended in v0**
 
-- Lost/stolen disk: the whole database is encrypted at rest as a single AEAD blob; no plaintext
-  payload, keys, or index touch disk (temp store is in memory).
-- Cloud/backup operator: only the encrypted receptacle is ever handed over; plaintext never leaves
-  the key boundary.
+- Lost/stolen disk (`--passphrase` mode; or any mode under full-disk encryption): the database is
+  encrypted at rest as a single AEAD blob; no plaintext payload or index touches disk (temp store is
+  in memory).
+- Cloud/backup operator (`--passphrase` mode): only the encrypted receptacle is handed over;
+  plaintext never leaves the key boundary. In default mode, exclude `keys/key.json` from any backup.
 - Accidental git commit of `.memoring/`: canonical-path resolution, symlink refusal, `chmod 0600`,
   and `.git/info/exclude`.
 - Prompt injection via a malicious transcript: a Safety Header separates current guidance from

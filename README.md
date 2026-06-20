@@ -24,7 +24,7 @@ v0 is single-user, local-first, source-only (TypeScript run via `tsx`, no build 
 remains frozen: implementation does not change a structural invariant without an ADR (see `AGENTS.md`).
 
 **Versioning.** Two deliberately distinct markers: `VERSION` (`1.0.0`) is the frozen **spec
-baseline**; `package.json` `version` (`0.1.1`) is the **code release**. They version different
+baseline**; `package.json` `version` (`0.1.2`) is the **code release**. They version different
 things and do not need to match.
 
 ## Quick start
@@ -43,7 +43,7 @@ npm install                      # if native installs are gated:
                                  #   npm approve-scripts better-sqlite3 esbuild fsevents && npm install
 npm run typecheck && npm test    # optional: verify the build
 
-# Create an encrypted local replica (generates a passphrase + recovery code — keep both):
+# Create the local replica (no password by default; add --passphrase for a strong encrypted vault):
 node bin/memoring.mjs init
 
 # Discover and connect your Claude Code history, choosing a sensitivity policy, then backfill:
@@ -56,6 +56,12 @@ node bin/memoring.mjs context build          # writes .memoring/context.md throu
 Safety model in one line: every output passes a single **Gate** (Audience × Aperture) before
 ranking; secret / unknown / out-of-scope / unclassified content is never emitted; deletions and
 Seals are durable across reprocessing. See the Specification (§7.3 egress table) and `SECURITY.md`.
+
+**Keys.** By default Memoring needs **no password** — the vault is encrypted with a local key file
+(`keys/key.json`, `0600`). This avoids plaintext SQLite/WAL and protects against leaking the vault
+blob alone, but not against someone who can read your home directory; for that, use full-disk
+encryption or `memoring init --passphrase` (strong, but if you lose the passphrase **and** recovery
+code the data is unrecoverable). Rationale: [docs/adr/0001-passwordless-default.md](docs/adr/0001-passwordless-default.md).
 
 ## Document map
 

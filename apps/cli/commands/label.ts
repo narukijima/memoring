@@ -3,7 +3,7 @@
 // confirms a merge. merge unions evidence (re-points assignments) and never
 // silently drops.
 import { replicaLayout } from '@core/paths';
-import { openRealm, type RealmContext } from '@core/runtime';
+import { openActiveRealm, type RealmContext } from '@core/runtime';
 import { normalizeLabel } from '@core/label-normalize';
 import { realmHmac } from '@security/crypto-primitives';
 import type { Label } from '@core/schema/entities';
@@ -18,8 +18,7 @@ function findLabel(ctx: RealmContext, nameOrId: string): Label | undefined {
 export async function cmdLabel(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const sub = flags._[0];
-  const passphrase = await getPassphrase();
-  const ctx = openRealm(passphrase, replicaLayout().root);
+  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
   let dirty = true;
   try {
     switch (sub) {

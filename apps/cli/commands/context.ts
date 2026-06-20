@@ -4,7 +4,7 @@
 // Realm or active scope cannot be uniquely resolved (FR-055).
 import path from 'node:path';
 import { replicaLayout } from '@core/paths';
-import { openRealm } from '@core/runtime';
+import { openActiveRealm } from '@core/runtime';
 import { resolveActiveRealm } from '@core/realm';
 import { buildContext } from '@retrieval/context-pack';
 import type { Aperture } from '@core/schema/enums';
@@ -22,8 +22,7 @@ export async function cmdContextBuild(argv: string[]): Promise<number> {
     return 1;
   }
 
-  const passphrase = await getPassphrase();
-  const ctx = openRealm(passphrase, replicaLayout().root);
+  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
   try {
     const realm = resolveActiveRealm(ctx.config, flags.realm as string | undefined);
     if (realm === 'silence') {

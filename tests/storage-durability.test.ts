@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { openRealm } from '@core/runtime';
+import { openRealmLocal } from '@core/runtime';
 import { makeTempRealm } from './helpers';
 
 describe('encrypted DB durability', () => {
@@ -8,7 +8,7 @@ describe('encrypted DB durability', () => {
     process.env.MEMORING_LOCK_MAX_WAIT_MS = '0'; // fail fast instead of waiting through the retry window
     const realm = makeTempRealm();
     try {
-      expect(() => openRealm('test-passphrase-1234', realm.root)).toThrow(/already open/);
+      expect(() => openRealmLocal(realm.root)).toThrow(/already open/);
 
       realm.ctx.flush();
       realm.ctx.close(true);
@@ -16,7 +16,7 @@ describe('encrypted DB durability', () => {
       // After the holder releases the lock, the next open succeeds — this is the
       // basis for daemon (watch) + context build coexistence: the daemon holds
       // the lock only per tick, so a CLI command can interleave between ticks.
-      const reopened = openRealm('test-passphrase-1234', realm.root);
+      const reopened = openRealmLocal(realm.root);
       try {
         expect(reopened.realmId).toBe(realm.ctx.realmId);
       } finally {

@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { replicaLayout } from '@core/paths';
-import { openRealm, type RealmContext } from '@core/runtime';
+import { openActiveRealm, type RealmContext } from '@core/runtime';
 import { getConnector } from '@intake/registry';
 import { runLoop, type LoopStats } from '@core/loop';
 import { log } from '@core/log';
@@ -43,18 +43,20 @@ export async function cmdWatch(argv: string[]): Promise<number> {
   parseFlags(argv);
   const debounceMs = 600;
 
-  const passphrase = await getPassphrase();
   const root = replicaLayout().root;
 
   // The daemon holds the replica lock ONLY for the duration of a tick (open →
   // loop → close), never continuously. This keeps context build / search /
   // governance usable while watching (they only contend during the brief tick
   // window, and the lock acquire retries across it), and each tick re-reads the
-  // latest blob so a concurrent CLI write is never clobbered. The DEK is
-  // re-derived from the held passphrase per tick and disposed immediately after,
-  // minimizing key residency (§7.4) more strongly than an idle timer.
+  // latest blob so a concurrent CLI write is never clobbered. In passphrase mode
+  // the passphrase is held in memory and the DEK re-derived per tick (disposed
+  // immediately after); passwordless replicas open via the local key, no prompt.
+  // Either way key residency is minimized (§7.4).
+  let heldPassphrase: string | undefined;
+  const provider = async (): Promise<string> => (heldPassphrase ??= await getPassphrase());
   const withRealm = async <T>(fn: (ctx: RealmContext) => Promise<T> | T): Promise<T> => {
-    const ctx = openRealm(passphrase, root); // re-derive DEK from the held passphrase
+    const ctx = await openActiveRealm(root, provider);
     try {
       return await fn(ctx);
     } finally {

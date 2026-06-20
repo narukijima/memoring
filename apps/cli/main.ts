@@ -18,7 +18,8 @@ import { cmdMcp } from './commands/mcp';
 const HELP = `Memoring — Sovereign Memory Loop (v0)
 
 Usage:
-  memoring init                          Create the encrypted replica (passphrase + recovery code).
+  memoring init [--passphrase]            Create the local replica (passwordless by default;
+                                          --passphrase = strong vault + one-time recovery code).
   memoring connect <connector> [opts]    Detect sources, choose include/exclude + Realm assignment.
       connectors: claude-code
       --all | --source <id>              Selection (no whole-tool default).
@@ -39,7 +40,7 @@ Usage:
   memoring delete <id> | redact <id>     Delete (cascade) / redact a record (needs --yes when headless).
   memoring suppress list|remove <id>     Inspect / release SealRules (user-only).
   memoring reprocess                     Re-parse stored raw (event_identity stays stable).
-  memoring export --purpose backup <dir> Full encrypted backup copy (incl. secret/unknown).
+  memoring export --purpose backup <dir> Full backup copy (incl. secret/unknown; sealed only with --passphrase).
   memoring mcp                           Start the read-only MCP stdio server (optional, experimental).
   memoring doctor                        Inspect compatibility + file safety (warns only).
 

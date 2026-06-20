@@ -3,6 +3,18 @@
 All notable changes to Memoring — the frozen specification baseline and the v0 implementation
 built against it — are recorded here.
 
+## 0.1.2 — passwordless by default
+
+- **Passwordless default; passphrase becomes opt-in.** `memoring init` now creates a passwordless
+  replica by default — the vault stays AEAD-encrypted, but the key lives in a local `keys/key.json`
+  (`0600`), so there is no password to set or forget. `memoring init --passphrase` opts into the
+  strong scrypt-wrapped vault with a one-time recovery code. Key handling is centralized in a single
+  mode-aware `openActiveRealm()` in core (CLI commands no longer each manage keys), which is also
+  what lets a future UI reuse the same path. Default mode is *local convenience protection*, not full
+  at-rest encryption — see `SECURITY.md` and the rationale/threat model in
+  `docs/adr/0001-passwordless-default.md`. Opening an existing `--passphrase` replica still works
+  (backward compatible); only the *default* key format is new.
+
 ## Unreleased — v0 implementation
 
 - **v0 implemented** against the frozen spec: CLI + local daemon, the four cores

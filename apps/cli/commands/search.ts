@@ -2,7 +2,7 @@
 // index. Locked Realm / unclassified / out-of-scope / secret never appear
 // (FR-040..042). Not the lead command; `context build` is.
 import { replicaLayout } from '@core/paths';
-import { openRealm } from '@core/runtime';
+import { openActiveRealm } from '@core/runtime';
 import { resolveActiveProjects } from '@core/realm';
 import { searchRealm } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
@@ -16,8 +16,7 @@ export async function cmdSearch(argv: string[]): Promise<number> {
     console.error('Usage: memoring search <query> [--scope <label>] [--project <id>]');
     return 1;
   }
-  const passphrase = await getPassphrase();
-  const ctx = openRealm(passphrase, replicaLayout().root);
+  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
   try {
     // Search is scope-gated and fails closed: if the active scope cannot be
     // resolved, Silence (do not fall open to a Realm-wide search) — mirrors

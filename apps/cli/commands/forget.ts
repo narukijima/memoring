@@ -2,7 +2,7 @@
 // governs after the fact; these are the only irreversible operations and require
 // explicit confirmation (Specification §8.2).
 import { replicaLayout } from '@core/paths';
-import { openRealm, type RealmContext } from '@core/runtime';
+import { openActiveRealm, type RealmContext } from '@core/runtime';
 import {
   deleteUndiluted,
   forgetByPattern,
@@ -24,8 +24,7 @@ async function confirm(flags: Flags, what: string): Promise<boolean> {
 }
 
 async function withRealm<T>(fn: (ctx: RealmContext) => T): Promise<T> {
-  const passphrase = await getPassphrase();
-  const ctx = openRealm(passphrase, replicaLayout().root);
+  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
   try {
     const r = fn(ctx);
     ctx.flush();
@@ -97,8 +96,7 @@ export async function cmdRedact(argv: string[]): Promise<number> {
 export async function cmdSuppress(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const sub = flags._[0];
-  const passphrase = await getPassphrase();
-  const ctx = openRealm(passphrase, replicaLayout().root);
+  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
   try {
     if (sub === 'list') {
       const rules = ctx.store.listSealRules(ctx.realmId);

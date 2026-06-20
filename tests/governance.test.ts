@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
 import { cmdClaim } from '../apps/cli/commands/claim';
-import { openRealm } from '@core/runtime';
+import { openRealmLocal } from '@core/runtime';
 import { deleteUndiluted, forgetByPattern, forgetClaim, redactEventById, releaseSealRule } from '@security/redaction';
 import { validateClaim } from '@claim/validator';
 import { readClaimStatement } from '@claim/extractor';
@@ -203,7 +203,7 @@ describe('claim correction safety', () => {
       else process.env.MEMORING_PASSPHRASE = prevPass;
     }
 
-    seeded.realm.ctx = openRealm('test-passphrase-1234', seeded.realm.root);
+    seeded.realm.ctx = openRealmLocal(seeded.realm.root);
     const reopened = seeded.realm.ctx;
     expect(reopened.store.getClaim(decision.claim_id)?.sensitivity).toBe('secret');
     expect(searchRealm(reopened, secret, { activeLabelIds: resolveActiveLabelIds(reopened, ['proj_test']) })).toEqual([]);

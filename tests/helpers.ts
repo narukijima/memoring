@@ -7,7 +7,7 @@ import { newId } from '@core/schema/ids';
 import { replicaLayout } from '@core/paths';
 import { attachRealm, type RealmContext } from '@core/runtime';
 import { type RealmConfig, writeRealmConfig } from '@core/realm';
-import { createKeyMaterial } from '@security/key-lifecycle';
+import { createLocalKeyMaterial } from '@security/key-lifecycle';
 import { ensureDir, atomicWriteFile } from '@storage/fs-safety';
 import { REPLICA_SUBDIRS } from '@core/paths';
 
@@ -22,8 +22,8 @@ export function makeTempRealm(opts?: { projects?: RealmConfig['projects'] }): Te
   const layout = replicaLayout(root);
   ensureDir(layout.root, 0o700);
   for (const key of REPLICA_SUBDIRS) ensureDir(layout[key], 0o700);
-  const { bundle, keyring } = createKeyMaterial('test-passphrase-1234');
-  atomicWriteFile(layout.keyBundle, JSON.stringify(bundle), 0o600);
+  const { keyFile, keyring } = createLocalKeyMaterial();
+  atomicWriteFile(layout.keyFile, JSON.stringify(keyFile), 0o600);
   const config: RealmConfig = {
     schema: 'realm.v1',
     realm_id: newId('realm'),

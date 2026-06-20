@@ -3,7 +3,7 @@
 // settings, retention, or permissions (FR-084).
 import fs from 'node:fs';
 import { replicaLayout } from '@core/paths';
-import { openRealm, replicaExists } from '@core/runtime';
+import { openActiveRealm, replicaExists } from '@core/runtime';
 import { listConnectors } from '@intake/registry';
 import { getPassphrase } from '../prompt';
 
@@ -14,7 +14,7 @@ export async function cmdDoctor(): Promise<number> {
     console.log('  [warn] No replica found. Run `memoring init`.');
     return 0;
   }
-  console.log('  [ok] realm.toml and key bundle present.');
+  console.log('  [ok] realm.toml and key present.');
 
   // Permission check on the replica root (best-effort).
   try {
@@ -32,9 +32,10 @@ export async function cmdDoctor(): Promise<number> {
     for (const note of det.notes) console.log(`         - ${note}`);
   }
 
-  const passphrase = await getPassphrase('Passphrase (to inspect realm contents, or Ctrl-C to skip): ');
   try {
-    const ctx = openRealm(passphrase, layout.root);
+    const ctx = await openActiveRealm(layout.root, () =>
+      getPassphrase('Passphrase (to inspect realm contents, or Ctrl-C to skip): '),
+    );
     try {
       const consolidated = ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated').length;
       const candidates = ctx.store.listClaimsByStatus(ctx.realmId, 'candidate').length;

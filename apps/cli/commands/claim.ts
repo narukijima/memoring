@@ -3,7 +3,7 @@
 // lowering sensitivity (no AI Declassify, G9); expire supersedes (drops from
 // active recall).
 import { replicaLayout } from '@core/paths';
-import { openRealm, type RealmContext } from '@core/runtime';
+import { openActiveRealm, type RealmContext } from '@core/runtime';
 import { reinforcement } from '@claim/lifecycle';
 import { readClaimStatement } from '@claim/extractor';
 import { indexClaim } from '@retrieval/search';
@@ -16,8 +16,7 @@ import { parseFlags } from '../args';
 export async function cmdClaim(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const sub = flags._[0];
-  const passphrase = await getPassphrase();
-  const ctx = openRealm(passphrase, replicaLayout().root);
+  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
   let dirty = true;
   try {
     switch (sub) {

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { replicaLayout } from '@core/paths';
-import { openRealm } from '@core/runtime';
+import { openActiveRealm } from '@core/runtime';
 import { writeRealmConfig, type RealmConnectorConfig, type RealmProjectConfig } from '@core/realm';
 import { getConnector } from '@intake/registry';
 import { sourceIdentity } from '@intake/identity';
@@ -70,8 +70,7 @@ export async function cmdConnect(argv: string[]): Promise<number> {
     return 1;
   }
 
-  const passphrase = await getPassphrase();
-  const ctx = openRealm(passphrase, replicaLayout().root);
+  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
   try {
     const detection = await connector.detect();
     console.log(`  ${connector.displayName}: detected ${detection.sources.length} source(s).`);

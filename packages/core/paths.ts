@@ -12,7 +12,8 @@ export interface ReplicaLayout {
   policiesDir: string;
   logsDir: string;
   keysDir: string;
-  keyBundle: string;
+  keyBundle: string; // passphrase mode: scrypt-wrapped key bundle
+  keyFile: string; // default mode: unwrapped local key (0600)
 }
 
 export function defaultReplicaRoot(): string {
@@ -31,6 +32,7 @@ export function replicaLayout(root = defaultReplicaRoot()): ReplicaLayout {
     logsDir: path.join(root, 'logs'),
     keysDir: path.join(root, 'keys'),
     keyBundle: path.join(root, 'keys', 'keybundle.json'),
+    keyFile: path.join(root, 'keys', 'key.json'),
   };
 }
 

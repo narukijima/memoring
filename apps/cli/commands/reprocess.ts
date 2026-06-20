@@ -3,7 +3,7 @@
 // produces no duplicate Events and never leaves Claim evidence dangling (G11);
 // candidates matching an active SealRule do not revive (§4.15).
 import { replicaLayout } from '@core/paths';
-import { openRealm, type RealmContext } from '@core/runtime';
+import { openActiveRealm, type RealmContext } from '@core/runtime';
 import { normalizeOccurrence } from '@intake/normalize';
 import { getConnector } from '@intake/registry';
 import { indexEvent } from '@retrieval/search';
@@ -13,8 +13,7 @@ import { parseFlags } from '../args';
 
 export async function cmdReprocess(argv: string[]): Promise<number> {
   parseFlags(argv); // --parser reserved (v0 has a single parser version per connector)
-  const passphrase = await getPassphrase();
-  const ctx = openRealm(passphrase, replicaLayout().root);
+  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
   try {
     let reEvents = 0;
     let occurrences = 0;
