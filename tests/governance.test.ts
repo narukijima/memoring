@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
-import { deleteUndiluted, forgetClaim, redactEventById, releaseSealRule } from '@security/redaction';
+import { deleteUndiluted, forgetByPattern, forgetClaim, redactEventById, releaseSealRule } from '@security/redaction';
 import { validateClaim } from '@claim/validator';
 import { readClaimStatement } from '@claim/extractor';
 import { searchRealm } from '@retrieval/search';
@@ -43,6 +43,18 @@ describe('forget / Seal durability (G10 / §4.15)', () => {
     // A fresh candidate with identical content + evidence must be rejected.
     const fresh: Claim = { ...decision, claim_id: 'clm_fresh', status: 'candidate' };
     expect(validateClaim(ctx, fresh, statement).decision).toBe('rejected');
+  });
+
+  it('forget --pattern durably suppresses NEW matching statements (G10 / FR-072)', () => {
+    const ctx = seeded.realm.ctx;
+    const pref = consolidatedByKind('preference'); // reuse its (intact) user-origin evidence
+    forgetByPattern(ctx, 'better-sqlite3');
+    // A brand-new candidate whose statement matches the sealed pattern is suppressed,
+    // even though its content/identity never existed at forget time.
+    const fresh: Claim = { ...pref, claim_id: 'clm_new_match', status: 'candidate' };
+    const r = validateClaim(ctx, fresh, 'we will use better-sqlite3 across the whole stack');
+    expect(r.decision).toBe('rejected');
+    expect(r.reasons).toContain('suppressed:sealed');
   });
 
   it('releasing the SealRule lets the same content validate again (user-only)', () => {
@@ -96,5 +108,15 @@ describe('delete / redact cascade (G10 / §7.3)', () => {
     expect(ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated').length).toBe(0);
     expect(ctx.store.getUndiluted(occ.undiluted_id)?.status).toBe('deleted');
     expect(ctx.store.countTombstones(ctx.realmId)).toBeGreaterThan(0);
+  });
+
+  it('prunes tombstoned occurrence_ids from Claim.evidence_occurrence_ids (FR-068)', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    const occId = decision.evidence_occurrence_ids[0]!;
+    const occ = ctx.store.getOccurrence(occId)!;
+    deleteUndiluted(ctx, occ.undiluted_id, { seal: false });
+    const after = ctx.store.getClaim(decision.claim_id)!;
+    expect(after.evidence_occurrence_ids).not.toContain(occId);
   });
 });

@@ -19,6 +19,20 @@ export function contentSealSignature(realmKey: Buffer, kind: string, statement: 
   return realmHmac(realmKey, 'content', kind, normalizeLabel(statement));
 }
 
+/** True if `text` matches any active pattern SealRule (regex source recovered
+ *  from reason_ref). Enforces the `pattern` match_type at §4.15. */
+export function matchesActivePatternSeal(ctx: RealmContext, text: string): boolean {
+  for (const rule of ctx.store.listSealRules(ctx.realmId)) {
+    if (!rule.active || rule.match_type !== 'pattern' || !rule.reason_ref) continue;
+    try {
+      if (new RegExp(rule.reason_ref, 'i').test(text)) return true;
+    } catch {
+      /* a malformed stored pattern never matches */
+    }
+  }
+  return false;
+}
+
 /** A candidate matching an active SealRule must not proceed (suppression check). */
 export function isClaimSuppressed(ctx: RealmContext, claim: Claim, statement: string): boolean {
   for (const eid of claim.evidence_event_identities) {
@@ -27,6 +41,7 @@ export function isClaimSuppressed(ctx: RealmContext, claim: Claim, statement: st
   }
   const contentSig = contentSealSignature(ctx.realmKey, claim.kind, statement);
   if (ctx.store.activeSealRulesBySignature(ctx.realmId, contentSig).length > 0) return true;
+  if (matchesActivePatternSeal(ctx, statement)) return true; // pattern match_type (§4.15)
   return false;
 }
 
@@ -35,6 +50,7 @@ export function createSealRule(
   matchType: SealRule['match_type'],
   targetSignature: string,
   now = new Date(),
+  patternSource?: string,
 ): SealRule {
   const rule: SealRule = {
     suppression_id: newId('sealRule', now.getTime()),
@@ -43,7 +59,9 @@ export function createSealRule(
     target_signature: targetSignature,
     scope: 'Realm',
     scope_ref: null,
-    reason_ref: null,
+    // For pattern rules, reason_ref carries the recoverable regex source (the DB
+    // is encrypted at rest, so this stays inside the key boundary).
+    reason_ref: patternSource ?? null,
     created_by: 'user',
     active: true,
     created_at: now.toISOString(),

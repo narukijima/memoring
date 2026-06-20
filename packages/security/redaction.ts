@@ -49,8 +49,14 @@ export function redactEvent(ctx: RealmContext, event: MemEvent, now = new Date()
   ctx.chronicler.append('redact', event.event_id, now);
 }
 
-/** After an evidence Event is gone, repair Claims that cited it. */
-function repairClaimsCiting(ctx: RealmContext, eventIdentity: string, now: Date): void {
+/** After an evidence Event is gone, repair Claims that cited it. Also prunes any
+ *  tombstoned occurrence_ids from the Claim's evidence_occurrence_ids (§7.3). */
+function repairClaimsCiting(
+  ctx: RealmContext,
+  eventIdentity: string,
+  prunedOccurrenceIds: Set<string>,
+  now: Date,
+): void {
   for (const claim of ctx.store.listClaimsCitingEvent(ctx.realmId, eventIdentity)) {
     const remaining = claim.evidence_event_identities.filter((e) => e !== eventIdentity);
     // Recount independent evidence among the events that still exist & are active.
@@ -62,6 +68,7 @@ function repairClaimsCiting(ctx: RealmContext, eventIdentity: string, now: Date)
     const updated: Claim = {
       ...claim,
       evidence_event_identities: remaining,
+      evidence_occurrence_ids: claim.evidence_occurrence_ids.filter((oid) => !prunedOccurrenceIds.has(oid)),
       evidence_count: independent,
     };
     if (independent < minEv || remaining.length === 0) {
@@ -84,7 +91,7 @@ export function redactEventById(
   if (!event) return false;
   redactEvent(ctx, event, now);
   if (opts.seal) createSealRule(ctx, 'event_identity', eventSealSignature(ctx.realmKey, event.event_identity), now);
-  repairClaimsCiting(ctx, event.event_identity, now);
+  repairClaimsCiting(ctx, event.event_identity, new Set(event.occurrence_ids), now);
   ctx.audit('redact', { event_id: eventId, sealed: opts.seal === true }, now);
   return true;
 }
@@ -109,9 +116,11 @@ export function deleteUndiluted(
 
   let events = 0;
   const affectedIdentities: string[] = [];
+  const tombstonedOccurrenceIds = new Set<string>();
   for (const occ of ctx.store.listOccurrencesByUndiluted(undilutedId)) {
     ctx.store.putOccurrence({ ...occ, status: 'tombstoned' });
     tombstone(ctx, occ.occurrence_id, 'occurrence', now);
+    tombstonedOccurrenceIds.add(occ.occurrence_id);
     for (const ev of ctx.store.listEventsForOccurrence(ctx.realmId, occ.occurrence_id)) {
       redactEvent(ctx, ev, now);
       affectedIdentities.push(ev.event_identity);
@@ -122,7 +131,7 @@ export function deleteUndiluted(
   const before = new Set<string>();
   for (const eid of affectedIdentities) {
     ctx.store.listClaimsCitingEvent(ctx.realmId, eid).forEach((c) => before.add(c.claim_id));
-    repairClaimsCiting(ctx, eid, now);
+    repairClaimsCiting(ctx, eid, tombstonedOccurrenceIds, now);
   }
   ctx.chronicler.append('delete', undilutedId, now);
   ctx.audit('delete', { undiluted_id: undilutedId, events, claims: before.size, sealed: opts.seal === true }, now);
@@ -165,7 +174,9 @@ export function forgetByPattern(ctx: RealmContext, pattern: string, now = new Da
     }
   }
   // A pattern SealRule suppresses future matches that re-enter via reprocess.
-  createSealRule(ctx, 'pattern', patternSealSignature(ctx.realmKey, pattern), now);
+  // The regex source is stored so isClaimSuppressed / normalize can re-evaluate it.
+  createSealRule(ctx, 'pattern', patternSealSignature(ctx.realmKey, pattern), now, pattern);
+  ctx.audit('seal_pattern', { matched: count }, now);
   return count;
 }
 

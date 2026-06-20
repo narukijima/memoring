@@ -35,7 +35,9 @@ function getOrCreateLabel(ctx: RealmContext, name: string, now: Date): Label {
 export interface ClassifyContext {
   projectId: string;
   projectName: string;
-  defaultSensitivity: Sensitivity; // from project policy (explicit authority)
+  /** Explicit project sensitivity policy, or null when the user declared none.
+   *  null means NO authorized Declassify — events stay `unknown` (Silence). */
+  defaultSensitivity: Sensitivity | null;
 }
 
 /** Resolve the project a given event belongs to, via session → source mapping. */
@@ -49,7 +51,8 @@ export function projectForEvent(ctx: RealmContext, event: MemEvent): ClassifyCon
   return {
     projectId,
     projectName: project.name,
-    defaultSensitivity: project.default_sensitivity ?? 'internal',
+    // No implicit default: only an explicitly declared policy authorizes Declassify (§4.3).
+    defaultSensitivity: project.default_sensitivity ?? null,
   };
 }
 
@@ -79,26 +82,23 @@ export function classifyEvent(ctx: RealmContext, event: MemEvent, now = new Date
   };
   ctx.store.putAssignment(assignment);
 
-  // Sensitivity: raise to the project default unless the event is already more
-  // sensitive (Escalate-only; secret is never lowered). unknown → default is a
-  // Declassify authorized by the explicit project policy.
+  // Sensitivity: an explicit project policy may raise `unknown` to its declared
+  // value (an authorized Declassify, §4.3). With NO declared policy, leave the
+  // event at `unknown` (Silence) — never synthesize a default. Already-higher
+  // sensitivity is never lowered (Escalate-only; secret is never declassified).
   const target = pc.defaultSensitivity;
-  let nextSensitivity = event.sensitivity;
-  let nextState = event.sensitivity_classification_state;
-  if (event.sensitivity === 'unknown') {
-    nextSensitivity = target;
-    nextState = 'inferred'; // authorized by project policy
-  } else {
-    // never lower; keep the max (Escalate-only direction)
-    nextSensitivity = maxSensitivity(event.sensitivity, target);
-  }
-  if (nextSensitivity !== event.sensitivity || nextState !== event.sensitivity_classification_state) {
-    const updated: MemEvent = {
-      ...event,
-      sensitivity: nextSensitivity,
-      sensitivity_classification_state: nextState,
-    };
-    ctx.store.putEvent(updated);
+  if (target !== null) {
+    let nextSensitivity = event.sensitivity;
+    let nextState = event.sensitivity_classification_state;
+    if (event.sensitivity === 'unknown') {
+      nextSensitivity = target;
+      nextState = 'inferred'; // authorized by the explicit project policy
+    } else {
+      nextSensitivity = maxSensitivity(event.sensitivity, target); // never lower
+    }
+    if (nextSensitivity !== event.sensitivity || nextState !== event.sensitivity_classification_state) {
+      ctx.store.putEvent({ ...event, sensitivity: nextSensitivity, sensitivity_classification_state: nextState });
+    }
   }
 
   ctx.chronicler.append('classify', event.event_id, now);

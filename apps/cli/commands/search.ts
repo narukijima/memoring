@@ -19,16 +19,19 @@ export async function cmdSearch(argv: string[]): Promise<number> {
   const passphrase = await getPassphrase();
   const ctx = openRealm(passphrase, replicaLayout().root);
   try {
-    // Restrict to active scope when resolvable; otherwise search the whole Realm
-    // the owner just unlocked (still classified / non-secret only).
-    let activeLabelIds: string[] | undefined;
+    // Search is scope-gated and fails closed: if the active scope cannot be
+    // resolved, Silence (do not fall open to a Realm-wide search) — mirrors
+    // context build (G4/FR-042).
     const res = resolveActiveProjects(ctx.config, {
       cwd: process.cwd(),
       scope: flags.scope as string | undefined,
       project: flags.project as string | undefined,
     });
-    if (res.kind === 'resolved') activeLabelIds = resolveActiveLabelIds(ctx, res.projectIds, flags.scope as string | undefined);
-
+    if (res.kind !== 'resolved') {
+      console.error(`  Silence: ${res.reason}. Specify --scope <label> or --project <id>.`);
+      return 0;
+    }
+    const activeLabelIds = resolveActiveLabelIds(ctx, res.projectIds, flags.scope as string | undefined);
     const results = searchRealm(ctx, query, { activeLabelIds });
     if (results.length === 0) {
       console.log('  No matches.');

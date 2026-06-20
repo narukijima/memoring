@@ -90,7 +90,9 @@ export interface SearchResult {
 }
 
 export interface SearchOptions {
-  /** When given, restrict candidates to these labels (out-of-scope excluded). */
+  /** Active scope labels. REQUIRED for any result: search fails closed — an
+   *  empty/absent set excludes everything, so out-of-scope items can never leak
+   *  (G4/FR-042). The CLI Silences when active scope is unresolved. */
   activeLabelIds?: string[];
   limit?: number;
 }
@@ -108,16 +110,15 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
     merged.push(hit);
   }
 
-  const active = opts.activeLabelIds ? new Set(opts.activeLabelIds) : null;
+  // Fail closed: a missing/empty active scope matches nothing (no Realm-wide fallback).
+  const active = new Set(opts.activeLabelIds ?? []);
   const out: SearchResult[] = [];
   for (const hit of merged) {
     // Defense in depth: never surface secret/unknown or unclassified.
     if (hit.sensitivity === 'secret' || hit.sensitivity === 'unknown') continue;
     if (!CLASSIFIED_STATES.has(hit.scope_state as ClassificationState)) continue;
-    if (active) {
-      const labels: string[] = JSON.parse(hit.label_ids);
-      if (!labels.some((l) => active.has(l))) continue; // out-of-scope excluded
-    }
+    const labels: string[] = JSON.parse(hit.label_ids);
+    if (!labels.some((l) => active.has(l))) continue; // out-of-scope excluded (always enforced)
     out.push({
       ref_id: hit.ref_id,
       ref_type: hit.ref_type,

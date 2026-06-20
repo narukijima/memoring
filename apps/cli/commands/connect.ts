@@ -44,6 +44,23 @@ function projectNameFor(source: DetectedSource): { name: string; root: string | 
   return { name: 'unscoped', root: null };
 }
 
+type DeclaredSensitivity = 'public' | 'internal' | 'confidential' | undefined;
+
+/** Resolve the explicit sensitivity policy for the connected project's scope.
+ *  Never synthesizes a default: a flag value (headless) or an interactive answer
+ *  is an explicit user declaration; blank → no policy (events stay unknown). */
+async function resolveDefaultSensitivity(flags: ReturnType<typeof parseFlags>): Promise<DeclaredSensitivity> {
+  const flagVal = flags['default-sensitivity'] as string | undefined;
+  const valid = (v: string): DeclaredSensitivity =>
+    v === 'public' || v === 'internal' || v === 'confidential' ? v : undefined;
+  if (typeof flagVal === 'string') return valid(flagVal);
+  if (process.env.MEMORING_PASSPHRASE) return undefined; // headless without flag → no policy
+  const a = await ask(
+    "  Declare this project's default sensitivity (explicit policy) [internal/public/confidential, blank=leave unknown]: ",
+  );
+  return valid(a.trim());
+}
+
 export async function cmdConnect(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const connectorId = normalizeConnectorId(flags._[0]);
@@ -67,10 +84,11 @@ export async function cmdConnect(argv: string[]): Promise<number> {
       return 0;
     }
 
-    const defaultSensitivity = ((flags['default-sensitivity'] as string) ?? 'internal') as
-      | 'public'
-      | 'internal'
-      | 'confidential';
+    // Sensitivity is an explicit project policy (a §4.3 Declassify authority), never
+    // a silent code default. Headless requires --default-sensitivity; interactive
+    // prompts. If left blank, the project gets NO policy and its events stay
+    // `unknown` (Silence) until the user declares one.
+    const defaultSensitivity = await resolveDefaultSensitivity(flags);
 
     const ci: ConnectorInstance = {
       connector_instance_id: newId('connectorInstance'),
@@ -107,7 +125,8 @@ export async function cmdConnect(argv: string[]): Promise<number> {
           name,
           root_paths: project.root_paths,
           git_remotes: project.git_remotes,
-          default_sensitivity: defaultSensitivity,
+          // Only record the policy when explicitly declared (omit otherwise).
+          ...(defaultSensitivity ? { default_sensitivity: defaultSensitivity } : {}),
         };
         ctx.config.projects.push(projectCfg);
         projectByRoot.set(rootKey, projectCfg);
