@@ -6,6 +6,7 @@
 import { CLASSIFIED_STATES, type ClassificationState } from '@core/schema/enums';
 import { normalizeLabel } from '@core/label-normalize';
 import { readClaimStatement } from '@claim/extractor';
+import { matchesActivePatternSeal } from '@claim/seal';
 import { bestClassificationState } from '@core/policy';
 import type { Claim, MemEvent } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
@@ -28,6 +29,7 @@ export function indexEvent(ctx: RealmContext, event: MemEvent): void {
   } catch {
     return;
   }
+  if (matchesActivePatternSeal(ctx, text)) return; // pattern Seal: do not advance to index (§4.15)
   const assignments = ctx.store.listAssignmentsForTarget('event', event.event_id);
   const labelIds = [...new Set(assignments.flatMap((a) => a.label_ids))];
   const scopeState = bestClassificationState(assignments.map((a) => a.classification_state)) ?? 'candidate';
@@ -48,6 +50,7 @@ export function indexClaim(ctx: RealmContext, claim: Claim): void {
   if (claim.sensitivity === 'secret' || claim.sensitivity === 'unknown') return;
   const statement = readClaimStatement(ctx, claim);
   if (!statement) return;
+  if (matchesActivePatternSeal(ctx, statement)) return; // pattern Seal (§4.15)
   const labelIds = claimLabelIds(ctx, claim);
   const scopeState = claimScopeState(ctx, claim) ?? 'inferred';
   if (labelIds.length === 0) return;
@@ -117,6 +120,9 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
     // Defense in depth: never surface secret/unknown or unclassified.
     if (hit.sensitivity === 'secret' || hit.sensitivity === 'unknown') continue;
     if (!CLASSIFIED_STATES.has(hit.scope_state as ClassificationState)) continue;
+    // Query-time pattern-Seal gate (defense in depth; also covers the MCP egress
+    // surface and any stale index entry).
+    if (matchesActivePatternSeal(ctx, hit.norm_text)) continue;
     const labels: string[] = JSON.parse(hit.label_ids);
     if (!labels.some((l) => active.has(l))) continue; // out-of-scope excluded (always enforced)
     out.push({

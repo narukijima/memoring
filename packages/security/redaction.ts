@@ -91,7 +91,10 @@ export function redactEventById(
   if (!event) return false;
   redactEvent(ctx, event, now);
   if (opts.seal) createSealRule(ctx, 'event_identity', eventSealSignature(ctx.realmKey, event.event_identity), now);
-  repairClaimsCiting(ctx, event.event_identity, new Set(event.occurrence_ids), now);
+  // A single-event redact does NOT tombstone the (possibly shared) Occurrence, so
+  // its occurrence_id stays valid for sibling events — prune nothing here. Only
+  // an actual Occurrence tombstone (deleteUndiluted) prunes occurrence_ids (§7.3).
+  repairClaimsCiting(ctx, event.event_identity, new Set(), now);
   ctx.audit('redact', { event_id: eventId, sealed: opts.seal === true }, now);
   return true;
 }
@@ -161,7 +164,10 @@ export function forgetClaim(
   return true;
 }
 
-/** forget --pattern: redact + Seal every Claim whose statement matches. */
+/** forget --pattern: redact + Seal every Claim whose statement matches, and
+ *  redact matching Events so the Sealed content is also removed from the index /
+ *  search / egress (suppression covers derived/output, §4.15/§7.3) while the raw
+ *  Undiluted persists. */
 export function forgetByPattern(ctx: RealmContext, pattern: string, now = new Date()): number {
   const re = new RegExp(pattern, 'i');
   let count = 0;
@@ -173,10 +179,26 @@ export function forgetByPattern(ctx: RealmContext, pattern: string, now = new Da
       count += 1;
     }
   }
+  // Redact already-indexed Events whose text matches (drops text_ref + deindexes).
+  let events = 0;
+  for (const ev of ctx.store.listEvents(ctx.realmId)) {
+    if (ev.status !== 'active' || !ev.text_ref) continue;
+    let text: string;
+    try {
+      text = ctx.objects.get(ev.text_ref).toString('utf8');
+    } catch {
+      continue;
+    }
+    if (re.test(text)) {
+      redactEvent(ctx, ev, now);
+      repairClaimsCiting(ctx, ev.event_identity, new Set(), now);
+      events += 1;
+    }
+  }
   // A pattern SealRule suppresses future matches that re-enter via reprocess.
-  // The regex source is stored so isClaimSuppressed / normalize can re-evaluate it.
+  // The regex source is stored so isClaimSuppressed / normalize / index re-evaluate it.
   createSealRule(ctx, 'pattern', patternSealSignature(ctx.realmKey, pattern), now, pattern);
-  ctx.audit('seal_pattern', { matched: count }, now);
+  ctx.audit('seal_pattern', { matched_claims: count, matched_events: events }, now);
   return count;
 }
 

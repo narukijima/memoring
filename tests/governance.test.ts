@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import { deleteUndiluted, forgetByPattern, forgetClaim, redactEventById, releaseSealRule } from '@security/redaction';
 import { validateClaim } from '@claim/validator';
 import { readClaimStatement } from '@claim/extractor';
-import { searchRealm } from '@retrieval/search';
+import { rebuildIndex, searchRealm } from '@retrieval/search';
+import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { buildContext } from '@retrieval/context-pack';
 import type { Claim } from '@core/schema/entities';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
@@ -87,6 +88,8 @@ describe('delete / redact cascade (G10 / §7.3)', () => {
     const evId = decision.evidence_event_identities[0]!;
     const event = ctx.store.findEventByIdentity(ctx.realmId, evId)!;
 
+    const occId = decision.evidence_occurrence_ids[0]!;
+    const active = resolveActiveLabelIds(ctx, ['proj_test']);
     expect(redactEventById(ctx, event.event_id, { seal: false })).toBe(true);
     expect(ctx.store.getEvent(event.event_id)?.status).toBe('redacted');
     expect(ctx.store.getEvent(event.event_id)?.text_ref).toBe(null);
@@ -94,8 +97,23 @@ describe('delete / redact cascade (G10 / §7.3)', () => {
     expect(ctx.store.getEvent(event.event_id)?.event_identity).toBe(evId);
     // dependent claim repaired → redacted (evidence dropped below minimum).
     expect(ctx.store.getClaim(decision.claim_id)?.status).toBe('redacted');
-    // index no longer surfaces it.
-    expect(searchRealm(ctx, 'better-sqlite3').length).toBe(0);
+    // index no longer surfaces it (search in-scope).
+    expect(searchRealm(ctx, 'better-sqlite3', { activeLabelIds: active }).length).toBe(0);
+    // The Occurrence was NOT tombstoned (only the Event redacted), so its
+    // occurrence_id is retained on the claim — no over-prune (FR-068 regression guard).
+    expect(ctx.store.getClaim(decision.claim_id)?.evidence_occurrence_ids).toContain(occId);
+  });
+
+  it('forget --pattern removes matching content from search/index, durably (G10/FR-072)', () => {
+    const ctx = seeded.realm.ctx;
+    const active = resolveActiveLabelIds(ctx, ['proj_test']);
+    expect(searchRealm(ctx, 'better-sqlite3', { activeLabelIds: active }).length).toBeGreaterThan(0);
+    forgetByPattern(ctx, 'better-sqlite3');
+    // Both the claim and the underlying event are gone from search (derived/output
+    // suppression), and a deterministic rebuild does not re-surface them.
+    expect(searchRealm(ctx, 'better-sqlite3', { activeLabelIds: active }).length).toBe(0);
+    rebuildIndex(ctx);
+    expect(searchRealm(ctx, 'better-sqlite3', { activeLabelIds: active }).length).toBe(0);
   });
 
   it('deleting the Undiluted cascades to all events and claims', () => {
