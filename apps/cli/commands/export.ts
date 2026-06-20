@@ -13,8 +13,9 @@ import { parseFlags } from '../args';
 
 export async function cmdExport(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
-  const purpose = (flags.purpose as string) ?? 'backup';
-  const dest = flags._.find((a) => a !== 'backup' && a !== 'redacted' && a !== 'dataset');
+  const positionalPurpose = ['backup', 'redacted', 'dataset'].includes(flags._[0] ?? '') ? flags._[0] : undefined;
+  const purpose = (flags.purpose as string) ?? positionalPurpose ?? 'backup';
+  const dest = positionalPurpose ? flags._[1] : flags._[0];
 
   if (purpose !== 'backup') {
     console.error(
