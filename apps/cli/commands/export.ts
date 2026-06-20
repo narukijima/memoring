@@ -37,6 +37,7 @@ export async function cmdExport(argv: string[]): Promise<number> {
     ctx.flush();
     realmId = ctx.realmId;
     claims = ctx.store.listClaims(ctx.realmId).length;
+    ctx.audit('backup_export', { claims });
   } finally {
     ctx.close(true);
   }

@@ -107,4 +107,9 @@ describe('evidence authority by origin (G8 / CON-010)', () => {
     const c = mkClaim('fact', [mkEvent('user', 'mixes a secret', 'secret')], { sensitivity: 'internal' });
     expect(validateClaim(realm.ctx, c, 'mixes a secret').decision).toBe('rejected');
   });
+
+  it('rejects an evidence-less candidate (MCP add_memory_candidate can never consolidate, FR-081)', () => {
+    const c = mkClaim('fact', [], { created_by: 'ai', evidence_count: 0 });
+    expect(validateClaim(realm.ctx, c, 'injected via mcp').decision).toBe('rejected');
+  });
 });

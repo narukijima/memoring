@@ -13,6 +13,7 @@ import { cmdLabel } from './commands/label';
 import { cmdReprocess } from './commands/reprocess';
 import { cmdWatch } from './commands/watch';
 import { cmdExport } from './commands/export';
+import { cmdMcp } from './commands/mcp';
 
 const HELP = `Memoring — Sovereign Memory Loop (v0)
 
@@ -39,6 +40,7 @@ Usage:
   memoring suppress list|remove <id>     Inspect / release SealRules (user-only).
   memoring reprocess                     Re-parse stored raw (event_identity stays stable).
   memoring export --purpose backup <dir> Full encrypted backup copy (incl. secret/unknown).
+  memoring mcp                           Start the read-only MCP stdio server (optional, experimental).
   memoring doctor                        Inspect compatibility + file safety (warns only).
 
 Environment:
@@ -80,6 +82,8 @@ async function main(): Promise<number> {
       return cmdWatch(rest);
     case 'export':
       return cmdExport(rest);
+    case 'mcp':
+      return cmdMcp();
     case 'doctor':
       return cmdDoctor();
     case 'help':

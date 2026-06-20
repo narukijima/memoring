@@ -85,6 +85,7 @@ export function redactEventById(
   redactEvent(ctx, event, now);
   if (opts.seal) createSealRule(ctx, 'event_identity', eventSealSignature(ctx.realmKey, event.event_identity), now);
   repairClaimsCiting(ctx, event.event_identity, now);
+  ctx.audit('redact', { event_id: eventId, sealed: opts.seal === true }, now);
   return true;
 }
 
@@ -124,6 +125,7 @@ export function deleteUndiluted(
     repairClaimsCiting(ctx, eid, now);
   }
   ctx.chronicler.append('delete', undilutedId, now);
+  ctx.audit('delete', { undiluted_id: undilutedId, events, claims: before.size, sealed: opts.seal === true }, now);
   return { events, claims: before.size };
 }
 
@@ -146,6 +148,7 @@ export function forgetClaim(
       createSealRule(ctx, 'event_identity', eventSealSignature(ctx.realmKey, eid), now);
     }
   }
+  ctx.audit('redact', { claim_id: claimId, kind: claim.kind, sealed: opts.seal !== false }, now);
   return true;
 }
 
@@ -172,5 +175,6 @@ export function releaseSealRule(ctx: RealmContext, suppressionId: string, now = 
   if (!rule) return false;
   ctx.store.putSealRule({ ...rule, active: false });
   ctx.chronicler.append('seal', suppressionId, now);
+  ctx.audit('seal_release', { suppression_id: suppressionId }, now);
   return true;
 }

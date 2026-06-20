@@ -191,6 +191,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   // 6. File safety (gate 7).
   writeContextFileSafely(opts.outPath, fullDoc, opts.cwd);
 
+  ctx.audit('context_pack_generate', { pack_id: packId, emitted: passed.length, dropped, audience, aperture }, now);
   return { kind: 'written', outPath: opts.outPath, packId, emitted: passed.length, dropped };
 }
 

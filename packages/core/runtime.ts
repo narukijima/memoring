@@ -7,6 +7,7 @@ import { ObjectStore } from '@storage/object-store';
 import { EncryptedDb } from '@storage/encrypted-db';
 import { Store } from '@storage/repositories';
 import { type KeyBundle, type Keyring, unlockWithPassphrase } from '@security/key-lifecycle';
+import { appendAudit, type AuditFields } from '@security/audit';
 import { Chronicler } from './chronicle';
 import { type RealmConfig, readRealmConfig } from './realm';
 import { type ReplicaLayout, replicaLayout } from './paths';
@@ -38,6 +39,11 @@ export class RealmContext {
 
   flush(): void {
     this.edb.flush();
+  }
+
+  /** Append an audit entry (ids/counts/state only — never payload). */
+  audit(op: string, fields: AuditFields = {}, now = new Date()): void {
+    appendAudit(this.layout.logsDir, op, { realm_id: this.realmId, ...fields }, now.toISOString());
   }
 
   close(persist = true): void {
