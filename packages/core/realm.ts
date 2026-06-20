@@ -61,6 +61,28 @@ export function canonicalize(p: string): string {
   }
 }
 
+/** Read the CWD's git remote URLs from plaintext .git/config (no subprocess), for
+ *  §3.4 active-scope resolution. Walks up to the repo root; returns [] if none. */
+function cwdGitRemotes(cwd: string): string[] {
+  let dir = canonicalize(cwd);
+  for (let i = 0; i < 32; i++) {
+    try {
+      const cfg = fs.readFileSync(path.join(dir, '.git', 'config'), 'utf8');
+      const urls: string[] = [];
+      const re = /^\s*url\s*=\s*(.+?)\s*$/gim;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(cfg)) !== null) urls.push(m[1]!);
+      return urls;
+    } catch {
+      /* not a repo at this level — keep walking up */
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return [];
+}
+
 /**
  * Active Realm resolution (§6.5). A replica holds one Realm, so resolution is
  * trivial unless an explicit --realm is given that does not match.
@@ -94,11 +116,17 @@ export function resolveActiveProjects(
     return { kind: 'resolved', projectIds: [match.project_id], basis: 'cli_project' };
   }
   const cwd = canonicalize(opts.cwd);
-  const matches = config.projects.filter((p) =>
-    p.root_paths.some((root) => {
-      const r = canonicalize(root);
-      return cwd === r || cwd.startsWith(r + path.sep);
-    }),
+  // §3.4 step 2: match the canonical CWD against Project.root_paths AND git_remotes.
+  // git_remotes are read (only when any project registers one) from the CWD's
+  // plaintext .git/config — resolution runs before unlock, so no DB access.
+  const anyRemotes = config.projects.some((p) => p.git_remotes.length > 0);
+  const remotes = anyRemotes ? new Set(cwdGitRemotes(opts.cwd)) : new Set<string>();
+  const matches = config.projects.filter(
+    (p) =>
+      p.root_paths.some((root) => {
+        const r = canonicalize(root);
+        return cwd === r || cwd.startsWith(r + path.sep);
+      }) || p.git_remotes.some((g) => remotes.has(g)),
   );
   if (matches.length === 1) {
     return { kind: 'resolved', projectIds: [matches[0]!.project_id], basis: 'cwd_project_match' };
