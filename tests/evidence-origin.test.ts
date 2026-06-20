@@ -108,6 +108,16 @@ describe('evidence authority by origin (G8 / CON-010)', () => {
     expect(validateClaim(realm.ctx, c, 'we will use X').decision).toBe('rejected');
   });
 
+  it('rejects a claim citing inactive evidence even when the origin was user', () => {
+    const event = mkEvent('user', 'redacted evidence');
+    const active = mkEvent('user', 'active evidence');
+    realm.ctx.store.putEvent({ ...event, status: 'redacted', text_ref: null });
+    const c = mkClaim('fact', [active, event], { sensitivity: 'internal' });
+    const result = validateClaim(realm.ctx, c, 'redacted evidence');
+    expect(result.decision).toBe('rejected');
+    expect(result.reasons).toContain('provenance:inactive_evidence');
+  });
+
   it('rejects a decision below the confidence threshold (τ_conf.decision = 0.85)', () => {
     const c = mkClaim('decision', [mkEvent('user', 'we decided')], { confidence: 0.8 });
     expect(validateClaim(realm.ctx, c, 'we decided').decision).toBe('rejected');

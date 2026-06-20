@@ -22,7 +22,7 @@ export function indexEvent(ctx: RealmContext, event: MemEvent): void {
   if (event.sensitivity === 'secret' || event.sensitivity === 'unknown') return;
   if (!event.text_ref) return; // secret/unusable-scan events have no normalized text
   const scan = ctx.store.getSecretScanForEvent(event.event_id);
-  if (scan && !scan.secret_scan_passed) return; // index build only after a passed scan
+  if (!scan?.secret_scan_passed) return; // index build only after a passed scan
   let text: string;
   try {
     text = ctx.objects.get(event.text_ref).toString('utf8');

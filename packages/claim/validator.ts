@@ -39,6 +39,7 @@ function evidenceEvents(ctx: RealmContext, claim: Claim): MemEvent[] {
  * origin anyway; checked for defense in depth). */
 function independentEvidence(events: MemEvent[]): MemEvent[] {
   return events.filter((e) => {
+    if (e.status !== 'active') return false;
     if (!isIndependentEvidenceOrigin(e.origin)) return false;
     if (e.context_injected && e.origin === 'assistant') return false;
     return true;
@@ -86,6 +87,9 @@ export function validateClaim(ctx: RealmContext, claim: Claim, statement: string
   // The canonical set is host_summary / host_memory / system / unknown — origins
   // that cannot be evidence AT ALL (§3.3.1); unknown was previously omitted here.
   for (const e of events) {
+    if (e.status !== 'active') {
+      return { decision: 'rejected', reasons: ['provenance:inactive_evidence'] };
+    }
     if (NON_EVIDENCE_ORIGINS.has(e.origin)) {
       return { decision: 'rejected', reasons: ['provenance:non_evidence_origin'] };
     }

@@ -20,10 +20,10 @@ interface SecretRule {
 // and indexed/egressed (§4.11 floor `contains_secret_span ⇒ secret`). So gaps
 // here cost confidentiality, not recall; prefer over-matching credential shapes.
 const RULES: SecretRule[] = [
-  { id: 'pem_private_key', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/ },
+  { id: 'pem_private_key', re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/ },
   { id: 'aws_access_key', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
   { id: 'aws_secret_key', re: /\baws_secret_access_key\b\s*[:=]\s*['"]?[A-Za-z0-9/+]{40}\b/i },
-  { id: 'openai_key', re: /\bsk-[A-Za-z0-9]{20,}\b/ },
+  { id: 'openai_key', re: /\bsk-(?:[A-Za-z0-9]+-)?[A-Za-z0-9_-]{20,}\b/ },
   { id: 'anthropic_key', re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/ },
   // Underscore-prefixed SaaS keys (Stripe sk_live_/sk_test_/rk_live_, etc.).
   { id: 'underscore_secret_key', re: /\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}\b/ },
@@ -39,7 +39,10 @@ const RULES: SecretRule[] = [
   // that never reaches "://" cannot trigger quadratic backtracking (ReDoS).
   { id: 'connection_string', re: /\b[a-z][a-z0-9+.-]{0,32}:\/\/[^\s:@/]+:[^\s:@/]{6,}@/i },
   // Secret assignment — quoted (>=8) OR unquoted high-entropy value (>=12 chars).
-  { id: 'generic_secret_assign', re: /\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|private[_-]?key)\b\s*[:=]\s*(?:['"][^'"\n]{8,}['"]|[^\s'"]{12,})/i },
+  {
+    id: 'generic_secret_assign',
+    re: /(?:^|[^A-Za-z0-9])(?:[A-Z0-9_-]*(?:password|passwd|secret|api[_-]?key|access[_-]?token|private[_-]?key)[A-Z0-9_-]*)\s*[:=]\s*(?:['"][^'"\n]{8,}['"]|[^\s'"]{12,})/i,
+  },
 ];
 
 export interface ScanOutcome {

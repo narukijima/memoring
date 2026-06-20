@@ -16,11 +16,18 @@ describe('Secret Scan (G3 / CON-007)', () => {
     expect(scanText('key rk_test_0123456789ABCDEFGHIJ').detected).toBe(true);
     // Unquoted secret assignments (the generic rule required quotes).
     expect(scanText('password=hunter2hunter2longenough').detected).toBe(true);
+    expect(scanText('DATABASE_PASSWORD=hunter2hunter2longenough').detected).toBe(true);
+    expect(scanText('MY_ACCESS_TOKEN=abcdefghijklmnopqrstuvwxyz').detected).toBe(true);
+    expect(scanText(`OPENAI_API_KEY=sk-proj-${'A'.repeat(48)}`).detected).toBe(true);
     // Connection-string userinfo passwords.
     expect(scanText('DATABASE_URL=postgres://admin:SuperSecret123@db.example.com/app').detected).toBe(true);
     // GitLab / Slack-app tokens.
     expect(scanText('glpat-ABCDEFGHIJKLMNOPQRST in ci').detected).toBe(true);
     expect(scanText('xapp-1-ABCDEFGHIJ-0987654321').detected).toBe(true);
+    // Modern hyphenated API-key families and encrypted PEM headers.
+    expect(scanText(`sk-proj-${'A'.repeat(48)}`).detected).toBe(true);
+    expect(scanText(`sk-svcacct-${'A'.repeat(48)}`).detected).toBe(true);
+    expect(scanText('-----BEGIN ENCRYPTED PRIVATE KEY-----').detected).toBe(true);
   });
 
   it('passes clean text without detection', () => {

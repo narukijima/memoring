@@ -9,6 +9,18 @@ import { SCHEMA_VERSION } from '@core/schema/versions';
 import { normalizeLabel } from '@core/label-normalize';
 import type { Claim, SealRule } from '@core/schema/entities';
 
+const MAX_PATTERN_LENGTH = 256;
+const BACKREFERENCE = /\\[1-9]/;
+const LOOKAROUND = /\(\?<?[=!]/;
+const RISKY_QUANTIFIED_GROUP = /\((?:\?:)?(?:[^()\\]|\\.)*(?:[+*{]|\|)(?:[^()\\]|\\.)*\)\s*[+*{?]/;
+
+export class UnsafeSealPatternError extends Error {
+  constructor(reason: string) {
+    super(`Unsafe Seal pattern: ${reason}`);
+    this.name = 'UnsafeSealPatternError';
+  }
+}
+
 export function eventSealSignature(realmKey: Buffer, eventIdentity: string): string {
   return realmHmac(realmKey, 'event', eventIdentity);
 }
@@ -19,15 +31,30 @@ export function contentSealSignature(realmKey: Buffer, kind: string, statement: 
   return realmHmac(realmKey, 'content', kind, normalizeLabel(statement));
 }
 
+export function compileSealPattern(pattern: string): RegExp {
+  if (pattern.length === 0) throw new UnsafeSealPatternError('empty pattern');
+  if (pattern.length > MAX_PATTERN_LENGTH) throw new UnsafeSealPatternError('pattern is too long');
+  if (BACKREFERENCE.test(pattern)) throw new UnsafeSealPatternError('backreferences are not allowed');
+  if (LOOKAROUND.test(pattern)) throw new UnsafeSealPatternError('lookaround is not allowed');
+  if (RISKY_QUANTIFIED_GROUP.test(pattern)) {
+    throw new UnsafeSealPatternError('nested quantified groups are not allowed');
+  }
+  try {
+    return new RegExp(pattern, 'i');
+  } catch (e) {
+    throw new UnsafeSealPatternError((e as Error).message);
+  }
+}
+
 /** True if `text` matches any active pattern SealRule (regex source recovered
  *  from reason_ref). Enforces the `pattern` match_type at §4.15. */
 export function matchesActivePatternSeal(ctx: RealmContext, text: string): boolean {
   for (const rule of ctx.store.listSealRules(ctx.realmId)) {
     if (!rule.active || rule.match_type !== 'pattern' || !rule.reason_ref) continue;
     try {
-      if (new RegExp(rule.reason_ref, 'i').test(text)) return true;
+      if (compileSealPattern(rule.reason_ref).test(text)) return true;
     } catch {
-      /* a malformed stored pattern never matches */
+      return true; // fail closed: an undecidable active SealRule suppresses output
     }
   }
   return false;

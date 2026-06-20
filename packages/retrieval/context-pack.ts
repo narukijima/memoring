@@ -14,6 +14,7 @@ import { TOKEN_BUDGET_RECIPE, type ContextPurpose } from '@core/recipe';
 import { log } from '@core/log';
 import { readClaimStatement } from '@claim/extractor';
 import { isClaimSuppressed } from '@claim/seal';
+import { validateClaim } from '@claim/validator';
 import { resolveActiveLabelIds } from './active-scope';
 import type { Aperture, Audience, ClassificationState } from '@core/schema/enums';
 import type { Claim, ContextPack, MemEvent } from '@core/schema/entities';
@@ -85,7 +86,7 @@ function toGateItem(ctx: RealmContext, sc: ScopedClaim): GateItem {
     scopeState: sc.scopeState,
     sensitivity: c.sensitivity,
     sensitivityState: c.sensitivity_classification_state,
-    hasRequiredProvenance: c.evidence_event_identities.length > 0,
+    hasRequiredProvenance: validateClaim(ctx, c, sc.statement).decision === 'consolidated',
     selfGeneratedContext: false, // enforced upstream (consolidation/Ouroboros)
   };
 }
@@ -164,7 +165,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     'no_secret',
     'no_unknown',
     'classified_only',
-    'no_confidential',
+    aperture === 'permissive' && opts.confidentialConfirmed ? 'confidential_one_shot_confirmed' : 'no_confidential',
     'historical_context_quarantine',
     'citations_required',
     'self_ingestion_marker',

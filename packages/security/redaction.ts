@@ -15,6 +15,7 @@ import { isIndependentEvidenceOrigin, type ClaimKind } from '@core/schema/enums'
 import { minEvidenceCount, thresholdKey } from '@core/recipe';
 import { readClaimStatement } from '@claim/extractor';
 import {
+  compileSealPattern,
   contentSealSignature,
   createSealRule,
   eventSealSignature,
@@ -182,7 +183,7 @@ export function forgetClaim(
  *  search / egress (suppression covers derived/output, §4.15/§7.3) while the raw
  *  Undiluted persists. */
 export function forgetByPattern(ctx: RealmContext, pattern: string, now = new Date()): number {
-  const re = new RegExp(pattern, 'i');
+  const re = compileSealPattern(pattern);
   let count = 0;
   for (const claim of ctx.store.listClaims(ctx.realmId)) {
     if (claim.status === 'redacted' || claim.status === 'rejected') continue;

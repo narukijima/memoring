@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
+import { cmdClaim } from '../apps/cli/commands/claim';
+import { openRealm } from '@core/runtime';
 import { deleteUndiluted, forgetByPattern, forgetClaim, redactEventById, releaseSealRule } from '@security/redaction';
 import { validateClaim } from '@claim/validator';
 import { readClaimStatement } from '@claim/extractor';
+import { createSealRule, patternSealSignature } from '@claim/seal';
 import { rebuildIndex, searchRealm } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { buildContext } from '@retrieval/context-pack';
@@ -54,6 +57,25 @@ describe('forget / Seal durability (G10 / §4.15)', () => {
     // even though its content/identity never existed at forget time.
     const fresh: Claim = { ...pref, claim_id: 'clm_new_match', status: 'candidate' };
     const r = validateClaim(ctx, fresh, 'we will use better-sqlite3 across the whole stack');
+    expect(r.decision).toBe('rejected');
+    expect(r.reasons).toContain('suppressed:sealed');
+  });
+
+  it('rejects unsafe user regex Seal patterns before mutation', () => {
+    const ctx = seeded.realm.ctx;
+    const before = ctx.store.listSealRules(ctx.realmId).length;
+    expect(() => forgetByPattern(ctx, '^(a+)+$')).toThrow(/Unsafe Seal pattern/);
+    expect(() => forgetByPattern(ctx, '(')).toThrow(/Unsafe Seal pattern/);
+    expect(ctx.store.listSealRules(ctx.realmId).length).toBe(before);
+  });
+
+  it('fails closed when an active stored pattern SealRule is undecidable', () => {
+    const ctx = seeded.realm.ctx;
+    const pref = consolidatedByKind('preference');
+    createSealRule(ctx, 'pattern', patternSealSignature(ctx.realmKey, '('), new Date(), '(');
+
+    const fresh: Claim = { ...pref, claim_id: 'clm_malformed_pattern', status: 'candidate' };
+    const r = validateClaim(ctx, fresh, 'a clean statement still cannot bypass an undecidable SealRule');
     expect(r.decision).toBe('rejected');
     expect(r.reasons).toContain('suppressed:sealed');
   });
@@ -157,6 +179,94 @@ describe('delete / redact cascade (G10 / §7.3)', () => {
     deleteUndiluted(ctx, occ.undiluted_id, { seal: false });
     const after = ctx.store.getClaim(decision.claim_id)!;
     expect(after.evidence_occurrence_ids).not.toContain(occId);
+  });
+});
+
+describe('claim correction safety', () => {
+  it('escalates corrected statement text containing a secret and removes it from egress', async () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    const secret = `sk-proj-${'A'.repeat(48)}`;
+    const prevHome = process.env.MEMORING_HOME;
+    const prevPass = process.env.MEMORING_PASSPHRASE;
+
+    ctx.flush();
+    ctx.close(true);
+    process.env.MEMORING_HOME = seeded.realm.root;
+    process.env.MEMORING_PASSPHRASE = 'test-passphrase-1234';
+    try {
+      await expect(cmdClaim(['correct', decision.claim_id, 'token', secret])).resolves.toBe(0);
+    } finally {
+      if (prevHome === undefined) delete process.env.MEMORING_HOME;
+      else process.env.MEMORING_HOME = prevHome;
+      if (prevPass === undefined) delete process.env.MEMORING_PASSPHRASE;
+      else process.env.MEMORING_PASSPHRASE = prevPass;
+    }
+
+    seeded.realm.ctx = openRealm('test-passphrase-1234', seeded.realm.root);
+    const reopened = seeded.realm.ctx;
+    expect(reopened.store.getClaim(decision.claim_id)?.sensitivity).toBe('secret');
+    expect(searchRealm(reopened, secret, { activeLabelIds: resolveActiveLabelIds(reopened, ['proj_test']) })).toEqual([]);
+
+    const result = buildContext(reopened, { cwd: seeded.projectRoot, outPath: path.join('.memoring', 'context.md') });
+    expect(result.kind).toBe('written');
+    expect(fs.readFileSync(path.join(seeded.projectRoot, '.memoring', 'context.md'), 'utf8')).not.toContain(secret);
+  });
+});
+
+describe('ContextPack provenance gate', () => {
+  it('drops a consolidated claim if its current evidence origin cannot be evidence', () => {
+    const ctx = seeded.realm.ctx;
+    const template = consolidatedByKind('decision');
+    const hostSummary = ctx.store.listEvents(ctx.realmId).find((e) => e.origin === 'host_summary');
+    expect(hostSummary).toBeDefined();
+    if (!hostSummary) return;
+    const statementRef = ctx.objects.put('bad_host_summary_claim', Buffer.from('Host summary should not be current guidance', 'utf8')).ref;
+    ctx.store.putClaim({
+      ...template,
+      claim_id: 'clm_bad_host_summary',
+      kind: 'fact',
+      statement_ref: statementRef,
+      evidence_event_identities: [hostSummary.event_identity],
+      evidence_occurrence_ids: hostSummary.occurrence_ids,
+      evidence_count: 1,
+      status: 'consolidated',
+      sensitivity: 'internal',
+      sensitivity_classification_state: 'inferred',
+    });
+
+    const result = buildContext(ctx, { cwd: seeded.projectRoot, outPath: path.join('.memoring', 'context.md') });
+    expect(result.kind).toBe('written');
+    const doc = fs.readFileSync(path.join(seeded.projectRoot, '.memoring', 'context.md'), 'utf8');
+    expect(doc).not.toContain('clm_bad_host_summary');
+    expect(doc).not.toContain('Host summary should not be current guidance');
+  });
+
+  it('records permissive confidential confirmation in the manifest policy', () => {
+    const ctx = seeded.realm.ctx;
+    const template = consolidatedByKind('decision');
+    const statementRef = ctx.objects.put('confidential_claim', Buffer.from('Confirmed confidential memory', 'utf8')).ref;
+    ctx.store.putClaim({
+      ...template,
+      claim_id: 'clm_confidential_confirmed',
+      kind: 'fact',
+      statement_ref: statementRef,
+      sensitivity: 'confidential',
+      sensitivity_classification_state: 'inferred',
+      status: 'consolidated',
+    });
+
+    const result = buildContext(ctx, {
+      cwd: seeded.projectRoot,
+      outPath: path.join('.memoring', 'context.md'),
+      aperture: 'permissive',
+      confidentialConfirmed: true,
+    });
+    expect(result.kind).toBe('written');
+    if (result.kind !== 'written') return;
+    const pack = ctx.store.listContextPacks(ctx.realmId).find((p) => p.context_pack_id === result.packId);
+    expect(pack?.policy_applied).toContain('confidential_one_shot_confirmed');
+    expect(pack?.policy_applied).not.toContain('no_confidential');
   });
 });
 

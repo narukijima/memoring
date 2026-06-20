@@ -9,6 +9,7 @@ import { readClaimStatement } from '@claim/extractor';
 import { indexClaim } from '@retrieval/search';
 import { hmacHex } from '@security/crypto-primitives';
 import { normalizeLabel } from '@core/label-normalize';
+import { scanText } from '@security/secret-scan';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 
@@ -70,12 +71,19 @@ function correct(ctx: RealmContext, id?: string, text?: string): number {
   if (!c) return notFound(id);
   // Replace the statement; sensitivity is preserved (correction never declassifies).
   const ref = ctx.objects.put(`${c.claim_id}_stmt_corr`, Buffer.from(text, 'utf8')).ref;
-  const updated = { ...c, statement_ref: ref };
+  const secretDetected = scanText(text).detected;
+  const updated = {
+    ...c,
+    statement_ref: ref,
+    sensitivity: secretDetected ? 'secret' : c.sensitivity,
+    sensitivity_classification_state: secretDetected ? 'inferred' : c.sensitivity_classification_state,
+  };
   ctx.store.putClaim(updated);
   // Re-key the dedup map and reindex.
   ctx.store.setMeta(`claimkey:${hmacHex(ctx.realmKey, `${c.kind}\x1f${normalizeLabel(text)}`)}`, c.claim_id);
-  if (updated.status === 'consolidated') indexClaim(ctx, updated);
-  console.log(`  Corrected ${id}.`);
+  if (secretDetected) ctx.store.indexDelete(c.claim_id);
+  else if (updated.status === 'consolidated') indexClaim(ctx, updated);
+  console.log(secretDetected ? `  Corrected ${id} (secret detected; output suppressed).` : `  Corrected ${id}.`);
   return 0;
 }
 
