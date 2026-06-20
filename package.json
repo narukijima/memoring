@@ -4,7 +4,17 @@
   "private": true,
   "description": "Sovereign Memory Loop — local-first, user-controlled AI memory asset (v0).",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "author": "The Memoring Authors",
+  "keywords": [
+    "ai-memory",
+    "local-first",
+    "privacy",
+    "claude-code",
+    "codex",
+    "sovereign-memory",
+    "cli"
+  ],
   "bin": {
     "memoring": "bin/memoring.mjs"
   },
