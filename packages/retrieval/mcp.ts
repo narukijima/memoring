@@ -6,9 +6,9 @@
 // evidence authority (prevents user-authority spoofing, FR-081).
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
+import { CLAIM_KINDS } from '@core/schema/enums';
 import { searchRealm } from './search';
 import { resolveActiveLabelIds } from './active-scope';
-import { readClaimStatement } from '@claim/extractor';
 import type { Claim } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
 
@@ -75,6 +75,11 @@ function handleAddCandidate(ctx: RealmContext, args: Record<string, unknown>): u
   const kind = String(args.kind ?? '');
   const statement = String(args.statement ?? '');
   if (!kind || !statement) return toolText('error: kind and statement are required', true);
+  // Enforce the advertised inputSchema enum at runtime (the hand-rolled dispatcher
+  // does not validate inputSchema).
+  if (!CLAIM_KINDS.includes(kind as Claim['kind'])) {
+    return toolText(`error: kind must be one of ${CLAIM_KINDS.join(', ')}`, true);
+  }
   const now = new Date();
   const ref = ctx.objects.put(`${newId('claim', now.getTime())}_stmt`, Buffer.from(statement, 'utf8')).ref;
   const claim: Claim = {
