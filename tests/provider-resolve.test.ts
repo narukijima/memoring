@@ -9,6 +9,7 @@ const LLM_ENV = [
   'MEMORING_LLM_API_KEY',
   'MEMORING_LLM_EGRESS',
   'MEMORING_LLM_ID',
+  'MEMORING_LLM_PROXY',
 ];
 function clearLlmEnv(): void {
   for (const k of LLM_ENV) delete process.env[k];
@@ -42,5 +43,17 @@ describe('resolveProvider (env-driven provider selection)', () => {
     clearLlmEnv();
     process.env.MEMORING_LLM_BASE_URL = 'https://api.deepseek.com/v1';
     expect(resolveProvider()).toBeInstanceOf(RuleBasedProvider);
+  });
+
+  it('forces remote egress for a subscription-bridging proxy, even on a loopback URL', () => {
+    // The bridge forwards raw text off-device, so the loopback→local heuristic
+    // must NOT silently exempt it from the pre-egress gate.
+    clearLlmEnv();
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:8787/v1';
+    process.env.MEMORING_LLM_MODEL = 'claude-via-proxy';
+    process.env.MEMORING_LLM_PROXY = '1';
+    const p = resolveProvider();
+    expect(p).toBeInstanceOf(LlmMemoryProvider);
+    expect(p.egress).toBe('remote'); // gate stays engaged despite the loopback host
   });
 });

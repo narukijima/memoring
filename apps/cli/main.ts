@@ -55,6 +55,11 @@ Environment:
   MEMORING_LLM_MODEL    Model id (e.g. deepseek-chat, gpt-4o-mini, qwen2.5:3b).
   MEMORING_LLM_API_KEY  API key for a remote endpoint (never persisted in config).
   MEMORING_LLM_EGRESS   Force local|remote (default: remote unless the URL is loopback).
+  MEMORING_LLM_PROXY    Opt in to an UNSUPPORTED subscription-bridging proxy (e.g. a local
+                        Claude Code / Codex bridge) to avoid an API key. HIGH RISK: likely
+                        violates the provider's ToS (account ban) and is fragile. Egress is
+                        forced to remote (raw history still leaves the device). Prefer a real
+                        local model (Ollama) instead — keyless, free, and actually on-device.
 `;
 
 async function main(): Promise<number> {
