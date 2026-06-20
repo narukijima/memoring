@@ -8,6 +8,7 @@ import {
   CLAIM_KINDS,
   isIndependentEvidenceOrigin,
   maxSensitivityOf,
+  NON_EVIDENCE_ORIGINS,
   type ClaimKind,
   type Origin,
   type Sensitivity,
@@ -82,8 +83,10 @@ export function validateClaim(ctx: RealmContext, claim: Claim, statement: string
   }
 
   // 5. provenance / Ouroboros: no self-generated context as evidence (CON-009/010).
+  // The canonical set is host_summary / host_memory / system / unknown — origins
+  // that cannot be evidence AT ALL (§3.3.1); unknown was previously omitted here.
   for (const e of events) {
-    if (e.origin === 'host_memory' || e.origin === 'host_summary' || e.origin === 'system') {
+    if (NON_EVIDENCE_ORIGINS.has(e.origin)) {
       return { decision: 'rejected', reasons: ['provenance:non_evidence_origin'] };
     }
   }

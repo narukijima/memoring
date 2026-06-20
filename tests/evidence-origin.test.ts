@@ -98,6 +98,16 @@ describe('evidence authority by origin (G8 / CON-010)', () => {
     expect(validateClaim(realm.ctx, mkClaim('decision', [mkEvent('system', 'sys')]), 'sys').decision).toBe('rejected');
   });
 
+  it('rejects any claim citing an unknown-origin event, even with sufficient independent evidence (§3.3.1)', () => {
+    // The user event alone satisfies the evidence count and sensitivity floor, so
+    // only the provenance gate (canonical non-evidence set, which includes
+    // `unknown`) can reject this — pins that `unknown` is in that set.
+    const c = mkClaim('fact', [mkEvent('user', 'we will use X', 'internal'), mkEvent('unknown', 'noise', 'public')], {
+      sensitivity: 'internal',
+    });
+    expect(validateClaim(realm.ctx, c, 'we will use X').decision).toBe('rejected');
+  });
+
   it('rejects a decision below the confidence threshold (τ_conf.decision = 0.85)', () => {
     const c = mkClaim('decision', [mkEvent('user', 'we decided')], { confidence: 0.8 });
     expect(validateClaim(realm.ctx, c, 'we decided').decision).toBe('rejected');
