@@ -5,7 +5,8 @@
 //     │     └─ realm_key    = HKDF(root, "realm-key")   ← HMAC identity/fingerprint
 //     └─ KEK_recovery = scrypt(R)        ─┐ wrap DEK (recovery path)
 //   passphrase ─ KEK_passphrase = scrypt ─┘ wrap DEK (normal path)
-//   DEK (32B, random)  → at-rest AEAD of DB blob + object store (rekey-able)
+//   DEK (32B, random)  → at-rest AEAD of DB blob + object store (KEK-rotatable via
+//                        rekeyPassphrase / upgradeLocalToPassphrase, NFR-014)
 //        └─ realm_root_secret stored AEAD(DEK, root) so passphrase unlock reaches realm_key
 //
 // The plaintext key never touches disk: only wrapped forms live in the bundle.
@@ -212,4 +213,76 @@ export function unlockFromLocalKey(keyFile: LocalKeyFile): Keyring {
   root.fill(0);
   realmRootSecret.fill(0);
   return new Keyring(dek, realmKey, keyFile.dek_id);
+}
+
+// ── KEK rotation (NFR-014) ──────────────────────────────────────────────────
+// Envelope re-encryption of the DEK without ever plaintext-ing the payload: the
+// DEK and realm_root_secret are unchanged, so realm_key — and therefore every
+// identity / fingerprint / Seal — survives a rotation. (Full DEK rekey, which
+// re-encrypts the DB blob + object store under a fresh DEK, is a separate, heavier
+// operation; KEK rotation is what remediates a compromised passphrase.)
+
+/** Change the passphrase: unlock the DEK with the old passphrase and re-wrap the
+ *  SAME DEK under a fresh KEK derived from the new passphrase (fresh scrypt salt).
+ *  Recovery wrap + root are untouched, so realm_key is preserved. */
+export function rekeyPassphrase(bundle: KeyBundle, oldPassphrase: string, newPassphrase: string): KeyBundle {
+  const oldKek = deriveKeyFromSecret(oldPassphrase, bundle.kdf_passphrase);
+  let dek: Buffer;
+  try {
+    dek = aeadOpen(oldKek, Buffer.from(bundle.dek_wrapped_passphrase, 'base64'));
+  } catch {
+    throw new WrongCredentialError('passphrase');
+  } finally {
+    oldKek.fill(0);
+  }
+  const kdfPp = defaultScryptParams();
+  const kekNew = deriveKeyFromSecret(newPassphrase, kdfPp);
+  const next: KeyBundle = {
+    ...bundle,
+    kdf_passphrase: kdfPp,
+    dek_wrapped_passphrase: aeadSeal(kekNew, dek).toString('base64'),
+  };
+  kekNew.fill(0);
+  dek.fill(0);
+  return next;
+}
+
+/** Upgrade a passwordless local vault to a passphrase vault, reusing the SAME DEK
+ *  and root (so realm_key/identities/Seals are preserved). The existing root R
+ *  becomes the recovery secret, so a one-time recovery code is issued too. */
+export function upgradeLocalToPassphrase(
+  keyFile: LocalKeyFile,
+  passphrase: string,
+  now = new Date(),
+): { bundle: KeyBundle; recoveryCode: string } {
+  if (keyFile.format !== LOCAL_KEY_FORMAT) {
+    throw new Error(`Unsupported local key format: ${String(keyFile.format)}`);
+  }
+  const dek = Buffer.from(keyFile.dek, 'base64');
+  const root = Buffer.from(keyFile.root_secret, 'base64'); // R — realm_key derives from this
+  const realmRootSecret = hkdf(root, ROOT_INFO);
+
+  const kdfPp = defaultScryptParams();
+  const kdfRec = defaultScryptParams();
+  const kekPp = deriveKeyFromSecret(passphrase, kdfPp);
+  const kekRec = deriveKeyFromSecret(root, kdfRec); // recovery secret = the existing root R
+
+  const bundle: KeyBundle = {
+    version: KEY_BUNDLE_VERSION,
+    dek_id: keyFile.dek_id,
+    kdf_passphrase: kdfPp,
+    kdf_recovery: kdfRec,
+    dek_wrapped_passphrase: aeadSeal(kekPp, dek).toString('base64'),
+    dek_wrapped_recovery: aeadSeal(kekRec, dek).toString('base64'),
+    realm_root_secret_enc: aeadSeal(dek, realmRootSecret).toString('base64'),
+    created_at: now.toISOString(),
+  };
+
+  kekPp.fill(0);
+  kekRec.fill(0);
+  realmRootSecret.fill(0);
+  dek.fill(0);
+  const recoveryCode = encodeRecovery(root);
+  root.fill(0);
+  return { bundle, recoveryCode };
 }

@@ -230,7 +230,13 @@ export const claudeCodeConnector: Connector = {
     const slice = buf.subarray(fromCursor);
     // Newline-align so we never split a JSON object across captures.
     const lastNl = slice.lastIndexOf(0x0a);
-    const end = lastNl >= 0 ? fromCursor + lastNl + 1 : buf.length;
+    // No newline in the unread slice = a single unterminated tail line. Under a live
+    // method ('watch') the writer may still be appending it, so do NOT advance the
+    // cursor past it — wait for the terminating newline (else the half-written line is
+    // captured + quarantined and its continuation can never be rejoined: data loss on
+    // an append source). A one-shot read ('backfill'/'manual') sees a settled file, so
+    // a trailing line with no final newline is complete and is captured.
+    const end = lastNl >= 0 ? fromCursor + lastNl + 1 : method === 'watch' ? fromCursor : buf.length;
     const bytes = buf.subarray(fromCursor, end);
     if (bytes.length === 0) return [];
     return [

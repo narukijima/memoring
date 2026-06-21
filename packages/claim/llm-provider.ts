@@ -3,9 +3,11 @@
 // Events. It only PROPOSES candidates — the validator/Gate keep authority
 // (CON-002), so a model can never push a Claim to `confirmed`. Vendor specifics
 // live behind LlmBackend so this file stays vendor-neutral (provider boundary,
-// Basic Design §2.6/§8). A `remote` backend's raw-text egress is gated upstream
-// in extractor.ts (pre-egress sensitivity gate); this provider never sees an
-// event the caller chose not to forward.
+// Basic Design §2.6/§8). A `remote` backend's raw-text egress is gated upstream in
+// two places: provider resolution enforces remote-default-off + explicit opt-in
+// (apps/cli/provider.ts), and extractor.ts applies the per-event pre-egress gate
+// (sensitivity floor + determination-state + Seal/suppression). This provider only
+// ever sees events the caller chose to forward.
 import { CLAIM_KINDS, type ClaimKind } from '@core/schema/enums';
 import type { AbstractCandidate, AbstractInput, MemoryProvider } from './provider';
 

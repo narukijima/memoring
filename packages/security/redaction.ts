@@ -13,7 +13,7 @@ import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { isIndependentEvidenceOrigin, type ClaimKind } from '@core/schema/enums';
 import { minEvidenceCount, thresholdKey } from '@core/recipe';
-import { readClaimStatement } from '@claim/extractor';
+import { claimKeyMeta, readClaimStatement } from '@claim/extractor';
 import {
   compileSealPattern,
   contentSealSignature,
@@ -76,7 +76,12 @@ function repairClaimsCiting(
       const e = ctx.store.findEventByIdentity(ctx.realmId, eid);
       return e && e.status === 'active' && isIndependentEvidenceOrigin(e.origin);
     }).length;
-    const minEv = minEvidenceCount(thresholdKey(claim.kind as ClaimKind, 'explicit'));
+    // Use the claim's OWN evidence bar: an ai/inferred claim needs ai_inferred_pattern
+    // (min 2), not the explicit bar (min 1). Hardcoding 'explicit' kept inferred claims
+    // indexed/searchable with a single surviving evidence after redaction (they should
+    // demote to redacted, matching what the validator would require).
+    const mode = claim.created_by === 'ai' ? 'inferred' : 'explicit';
+    const minEv = minEvidenceCount(thresholdKey(claim.kind as ClaimKind, mode));
     const updated: Claim = {
       ...claim,
       evidence_event_identities: remaining,
@@ -166,12 +171,21 @@ export function forgetClaim(
   const statement = readClaimStatement(ctx, claim);
   ctx.store.putClaim({ ...claim, status: 'redacted', conflict_reason: 'forgotten' });
   ctx.store.indexDelete(claimId);
+  // Drop the dedup key so a later re-derivation produces a FRESH candidate that
+  // re-enters validation (where the content Seal, if any, rejects it) instead of
+  // silently auto-merging new evidence into this dead claim (§4.15 durability).
+  ctx.store.deleteMeta(claimKeyMeta(ctx.realmKey, claim.kind, statement));
   tombstoneClaimFromPacks(ctx, claimId, now);
   ctx.chronicler.append('redact', claimId, now);
   if (opts.seal !== false) {
     createSealRule(ctx, 'content_signature', contentSealSignature(ctx.realmKey, claim.kind, statement), now);
     for (const eid of claim.evidence_event_identities) {
       createSealRule(ctx, 'event_identity', eventSealSignature(ctx.realmKey, eid), now);
+      // Deindex the sealed evidence event so its raw text is not returned by
+      // search / MCP before the next rebuild (the index/searchRealm Seal checks
+      // keep it out durably; this drops the live row immediately).
+      const ev = ctx.store.findEventByIdentity(ctx.realmId, eid);
+      if (ev) ctx.store.indexDelete(ev.event_id);
     }
   }
   ctx.audit('redact', { claim_id: claimId, kind: claim.kind, sealed: opts.seal !== false }, now);

@@ -64,8 +64,9 @@ function handleSearch(ctx: RealmContext, args: Record<string, unknown>): unknown
   if (!query) return toolText('error: query is required', true);
   if (!scope) return toolText('error: scope is required (MCP is scope-gated)', true);
   const activeLabelIds = resolveActiveLabelIds(ctx, [], scope);
-  // MCP additionally excludes confidential (Specification §4).
-  const hits = searchRealm(ctx, query, { activeLabelIds }).filter((h) => h.sensitivity !== 'confidential');
+  // searchRealm already excludes secret/unknown/confidential and Seal-suppressed
+  // hits (Specification §4), so this surface inherits the §4 guarantee centrally.
+  const hits = searchRealm(ctx, query, { activeLabelIds });
   ctx.audit('mcp_request', { tool: 'memoring_search', results: hits.length });
   if (hits.length === 0) return toolText('No matches.');
   return toolText(hits.map((h) => `${h.ref_id} [${h.ref_type}] ${h.snippet}`).join('\n'));

@@ -14,12 +14,15 @@ import { cmdReprocess } from './commands/reprocess';
 import { cmdWatch } from './commands/watch';
 import { cmdExport } from './commands/export';
 import { cmdMcp } from './commands/mcp';
+import { cmdRekey } from './commands/rekey';
 
 const HELP = `Memoring — Sovereign Memory Loop (v0)
 
 Usage:
   memoring init [--passphrase]            Create the local replica (passwordless by default;
                                           --passphrase = strong vault + one-time recovery code).
+  memoring rekey [--passphrase]           Rotate the KEK: change the passphrase, or upgrade a
+                                          passwordless vault to a passphrase one (DEK unchanged).
   memoring connect <connector> [opts]    Detect sources, choose include/exclude + Realm assignment.
       connectors: claude-code
       --all | --source <id>              Selection (no whole-tool default).
@@ -55,6 +58,10 @@ Environment:
   MEMORING_LLM_MODEL    Model id (e.g. deepseek-chat, gpt-4o-mini, qwen2.5:3b).
   MEMORING_LLM_API_KEY  API key for a remote endpoint (never persisted in config).
   MEMORING_LLM_EGRESS   Force local|remote (default: remote unless the URL is loopback).
+  MEMORING_LLM_REMOTE_OPT_IN  Remote (off-device) AI is DEFAULT-OFF (§7.3). Set =1 to permit
+                        sending raw history to a remote endpoint; otherwise Memoring falls back
+                        to the on-device rule-based provider. A loopback (local) model needs no
+                        opt-in. The per-event egress is still gated (sensitivity + Seal).
   MEMORING_LLM_PROXY    Opt in to an UNSUPPORTED subscription-bridging proxy (e.g. a local
                         Claude Code / Codex bridge) to avoid an API key. HIGH RISK: likely
                         violates the provider's ToS (account ban) and is fragile. Egress is
@@ -67,6 +74,8 @@ async function main(): Promise<number> {
   switch (command) {
     case 'init':
       return cmdInit(rest);
+    case 'rekey':
+      return cmdRekey(rest);
     case 'connect':
       return cmdConnect(rest);
     case 'backfill':

@@ -25,7 +25,7 @@ export interface OpenAiCompatibleOptions {
   timeoutMs?: number;
 }
 
-function isLoopback(baseURL: string): boolean {
+export function isLoopback(baseURL: string): boolean {
   try {
     const h = new URL(baseURL).hostname.replace(/^\[|\]$/g, '');
     return h === 'localhost' || h === '127.0.0.1' || h === '::1';

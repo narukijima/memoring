@@ -39,9 +39,14 @@ const RULES: SecretRule[] = [
   // that never reaches "://" cannot trigger quadratic backtracking (ReDoS).
   { id: 'connection_string', re: /\b[a-z][a-z0-9+.-]{0,32}:\/\/[^\s:@/]+:[^\s:@/]{6,}@/i },
   // Secret assignment — quoted (>=8) OR unquoted high-entropy value (>=12 chars).
+  // The name-char runs around the keyword are BOUNDED ({0,40}); unbounded `*` runs
+  // overlapping the keyword class backtrack quadratically (ReDoS) on a long
+  // dash/underscore prefix with no trailing assignment. Real identifier names are
+  // short, so {0,40} keeps every positive while killing the catastrophic path
+  // (sibling connection_string was bounded for the same reason).
   {
     id: 'generic_secret_assign',
-    re: /(?:^|[^A-Za-z0-9])(?:[A-Z0-9_-]*(?:password|passwd|secret|api[_-]?key|access[_-]?token|private[_-]?key)[A-Z0-9_-]*)\s*[:=]\s*(?:['"][^'"\n]{8,}['"]|[^\s'"]{12,})/i,
+    re: /(?:^|[^A-Za-z0-9])(?:[A-Z0-9_-]{0,40}(?:password|passwd|secret|api[_-]?key|access[_-]?token|private[_-]?key)[A-Z0-9_-]{0,40})\s*[:=]\s*(?:['"][^'"\n]{8,}['"]|[^\s'"]{12,})/i,
   },
 ];
 

@@ -9,6 +9,7 @@ import { normalizeLabel } from '@core/label-normalize';
 import { hmacHex } from '@security/crypto-primitives';
 import { isIndependentEvidenceOrigin, maxSensitivityOf, type Sensitivity } from '@core/schema/enums';
 import { allowedSensitivity, allowedSensitivityState } from '@core/policy';
+import { eventSealSignature, matchesActivePatternSeal } from './seal';
 import { log } from '@core/log';
 import type { Claim, Derivation, MemEvent } from '@core/schema/entities';
 import type { AbstractCandidate, AbstractInput, MemoryProvider } from './provider';
@@ -27,8 +28,11 @@ function readText(ctx: RealmContext, event: MemEvent): string | null {
   }
 }
 
-function claimKey(kind: string, statement: string): string {
-  return `${kind}\x1f${normalizeLabel(statement)}`;
+/** The persistent dedup-map key for a (kind, statement) pair. Shared by the
+ *  abstractor (write/read), `claim correct`, and `forget` (clear) so the format
+ *  never drifts across the call sites that must agree on it. */
+export function claimKeyMeta(realmKey: Buffer, kind: string, statement: string): string {
+  return `claimkey:${hmacHex(realmKey, `${kind}\x1f${normalizeLabel(statement)}`)}`;
 }
 
 function recordDerivation(ctx: RealmContext, provider: MemoryProvider, event: MemEvent, now: Date): Derivation {
@@ -74,22 +78,28 @@ export async function abstractEvents(
 
   // Filter to eligible events and read their text once. Only user-origin events
   // (independent evidence; never context_injected assistant text, Ouroboros) feed
-  // abstraction. The remote pre-egress gate withholds anything the output Gate
-  // would block (secret / unknown / unconfirmed-confidential / candidate-state),
-  // so a `remote` provider never receives raw text the Gate forbids.
+  // abstraction. For an off-device (`remote`) provider the prompt itself is an
+  // egress, so each event must clear the output Gate's remote_ai_processing
+  // predicates: the sensitivity floor AND determination-state, PLUS the suppression
+  // predicates (active status, event-identity Seal, pattern Seal) — so a
+  // forgotten/sealed/redacted event's raw text is never sent off-device. Remote
+  // default-off + scope opt-in are enforced at provider resolution (apps/cli/
+  // provider.ts, docs/adr/0003). A `local` provider stays on-device and is exempt.
   const eligible: { event: MemEvent; input: AbstractInput }[] = [];
   for (const event of events) {
     if (!isIndependentEvidenceOrigin(event.origin)) continue;
     if (event.origin !== 'user') continue; // v0 heuristics target explicit user statements
-    if (
-      provider.egress === 'remote' &&
-      (!allowedSensitivity(event.sensitivity, 'remote_ai_processing', 'standard') ||
-        !allowedSensitivityState(event.sensitivity_classification_state, 'remote_ai_processing', 'standard'))
-    ) {
-      continue; // mirror the output Gate exactly — value AND determination-state
+    if (provider.egress === 'remote') {
+      if (!allowedSensitivity(event.sensitivity, 'remote_ai_processing', 'standard')) continue;
+      if (!allowedSensitivityState(event.sensitivity_classification_state, 'remote_ai_processing', 'standard')) continue;
+      if (event.status !== 'active') continue; // redacted/deleted text never egresses
+      const sealed =
+        ctx.store.activeSealRulesBySignature(ctx.realmId, eventSealSignature(ctx.realmKey, event.event_identity)).length > 0;
+      if (sealed) continue; // a forgotten/sealed event_identity must not reach an external model
     }
     const text = readText(ctx, event);
     if (!text) continue;
+    if (provider.egress === 'remote' && matchesActivePatternSeal(ctx, text)) continue; // pattern Seal
     eligible.push({ event, input: { text, origin: event.origin, role: event.role } });
   }
 
@@ -112,14 +122,19 @@ export async function abstractEvents(
       if (!src) continue; // candidate cites an out-of-range turn → cannot attribute, drop
       const event = src.event;
       const evidenceSensitivity: Sensitivity = maxSensitivityOf([event.sensitivity]);
-      const key = claimKey(cand.kind, cand.statement);
-      const keyHash = hmacHex(ctx.realmKey, key);
-      const existingId = ctx.store.getMeta(`claimkey:${keyHash}`);
+      const metaKey = claimKeyMeta(ctx.realmKey, cand.kind, cand.statement);
+      const existingId = ctx.store.getMeta(metaKey);
+      const existing = existingId ? ctx.store.getClaim(existingId) : undefined;
+      // A redacted/rejected/superseded claim is dead: never accrete evidence into a
+      // tombstone. Treat it as absent, clear the stale mapping, and fall through to
+      // create a fresh candidate that re-enters validation (content Seal rejects it
+      // if still sealed). (durability/correctness — forget/correct keep the map clean)
+      const existingLive =
+        existing && existing.status !== 'redacted' && existing.status !== 'rejected' && existing.status !== 'superseded';
 
-      if (existingId) {
+      if (existing && existingLive) {
         // Auto-merge: union evidence into the existing claim (FR-035).
-        const existing = ctx.store.getClaim(existingId);
-        if (existing && !existing.evidence_event_identities.includes(event.event_identity)) {
+        if (!existing.evidence_event_identities.includes(event.event_identity)) {
           const updated: Claim = {
             ...existing,
             evidence_event_identities: [...existing.evidence_event_identities, event.event_identity],
@@ -132,6 +147,7 @@ export async function abstractEvents(
         }
         continue;
       }
+      if (existingId && !existingLive) ctx.store.deleteMeta(metaKey);
 
       const assignments = ctx.store.listAssignmentsForTarget('event', event.event_id);
       const derivation = recordDerivation(ctx, provider, event, now);
@@ -172,7 +188,7 @@ export async function abstractEvents(
         schema_version: SCHEMA_VERSION.claim,
       };
       ctx.store.putClaim(claim);
-      ctx.store.setMeta(`claimkey:${keyHash}`, claim.claim_id);
+      ctx.store.setMeta(metaKey, claim.claim_id);
       ctx.chronicler.append('abstract', claim.claim_id, now);
       newCandidates.push(claim);
     }

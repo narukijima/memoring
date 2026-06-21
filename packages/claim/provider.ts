@@ -34,9 +34,9 @@ export interface MemoryProvider {
   /** Egress class of this provider's `abstract` call. `local` runs entirely
    *  on-device (Mode A rule-based / local LLM) and shares the loop's trust
    *  envelope. `remote` sends raw Event text off-device (Mode C) and MUST be fed
-   *  only events that clear the pre-egress sensitivity gate — the caller enforces
-   *  this (extractor.ts), reusing the output Gate's `allowedSensitivity` so there
-   *  is no second, divergent safety predicate. */
+   *  only events that clear the pre-egress gate — the caller enforces this
+   *  (extractor.ts), reusing the output Gate's sensitivity floor, determination-state,
+   *  and Seal/suppression predicates so there is no second, divergent safety check. */
   egress: 'local' | 'remote';
   /** abstract — the leap from Events to Claim candidates. May be async (a model
    *  call); the caller awaits. Batch-capable by signature (`inputs[]`). The

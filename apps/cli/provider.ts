@@ -3,11 +3,16 @@
 // (Mode A). When MEMORING_LLM_BASE_URL is set, build an OpenAI-compatible LLM
 // provider (Mode B local / Mode C remote) — one adapter covers OpenAI, DeepSeek,
 // and a local Ollama endpoint. The API key comes from env and is never persisted
-// in realm config. A remote provider's raw-text egress is gated upstream
-// (extractor.ts pre-egress gate); see docs/adr/0002.
+// in realm config.
+//
+// Remote (off-device) egress is DEFAULT-OFF (Specification §7.3 remote-ai-default-off):
+// it requires an explicit MEMORING_LLM_REMOTE_OPT_IN, otherwise Memoring refuses
+// the remote provider and falls back to the on-device rule-based provider. Once
+// permitted, the per-event raw-text egress is additionally gated in extractor.ts
+// (sensitivity floor + determination-state + Seal/suppression). See docs/adr/0003.
 import { RuleBasedProvider, type MemoryProvider } from '@claim/provider';
 import { LlmMemoryProvider } from '@claim/llm-provider';
-import { OpenAiCompatibleBackend } from '@integrations/llm/openai-compatible';
+import { OpenAiCompatibleBackend, isLoopback } from '@integrations/llm/openai-compatible';
 import { log } from '@core/log';
 
 export function resolveProvider(): MemoryProvider {
@@ -44,11 +49,19 @@ export function resolveProvider(): MemoryProvider {
     }
   }
 
+  // Resolve the effective egress the SAME way the backend would (so the default-off
+  // gate also covers a cloud URL with no explicit MEMORING_LLM_EGRESS).
+  const effectiveEgress: 'local' | 'remote' = egress ?? (isLoopback(baseURL) ? 'local' : 'remote');
+  if (effectiveEgress === 'remote' && !isTruthy(process.env.MEMORING_LLM_REMOTE_OPT_IN)) {
+    warnRemoteDefaultOff();
+    return new RuleBasedProvider();
+  }
+
   const backend = new OpenAiCompatibleBackend({
     baseURL,
     model,
     apiKey: process.env.MEMORING_LLM_API_KEY,
-    egress,
+    egress: effectiveEgress,
     id: process.env.MEMORING_LLM_ID,
   });
   const provider = new LlmMemoryProvider(backend);
@@ -58,6 +71,20 @@ export function resolveProvider(): MemoryProvider {
 
 function isTruthy(v: string | undefined): boolean {
   return v === '1' || v?.toLowerCase() === 'true' || v?.toLowerCase() === 'yes';
+}
+
+/** Remote AI is default-off (§7.3). Refuse off-device egress unless the user has
+ *  explicitly opted in, and say exactly how to opt in or stay on-device. */
+function warnRemoteDefaultOff(): void {
+  const lines = [
+    'A REMOTE (off-device) LLM provider is configured, but remote AI is default-OFF.',
+    'Your raw history will NOT be sent to a third party until you explicitly opt in:',
+    '    set MEMORING_LLM_REMOTE_OPT_IN=1',
+    'Falling back to the on-device rule-based provider (Mode A) for now. For a keyless,',
+    'fully on-device path, run a local model (e.g. Ollama) on a loopback URL instead.',
+  ];
+  for (const l of lines) console.error(`  [warn] ${l}`);
+  log.warn('provider:remote_default_off', { opted_in: false });
 }
 
 /** Loud, unmissable notice for the unsupported subscription-bridging proxy path. */

@@ -141,6 +141,19 @@ export class EncryptedDb {
       if (fs.existsSync(blobPath)) {
         const plain = aeadOpen(dek, fs.readFileSync(blobPath));
         db = new Database(plain);
+        // Fail fast on a vault written by a NEWER binary (format we cannot read):
+        // the GCM tag authenticates contents but binds no format version, and the
+        // idempotent CREATE-IF-NOT-EXISTS DDL would otherwise silently run against a
+        // mismatched schema. (An older/equal version is accepted; migrations land here.)
+        const row = db.prepare("SELECT value FROM meta WHERE key = 'store_format_version'").get() as
+          | { value: string }
+          | undefined;
+        const onDisk = row ? Number(row.value) : 0;
+        if (Number.isFinite(onDisk) && onDisk > STORE_FORMAT_VERSION) {
+          throw new Error(
+            `Vault store_format_version ${onDisk} is newer than this build supports (${STORE_FORMAT_VERSION}); upgrade memoring.`,
+          );
+        }
         // Re-apply config + idempotent DDL so format upgrades land on open.
         EncryptedDb.configure(db);
       } else {

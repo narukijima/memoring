@@ -58,6 +58,18 @@ describe('Secret Scan (G3 / CON-007)', () => {
     expect(performance.now() - start).toBeLessThan(250); // linear ~1ms; quadratic would be ~1s
   });
 
+  it('scans a long name-char run before a keyword in linear time (no generic_secret_assign ReDoS)', () => {
+    // A long dash/underscore run containing a keyword but with no trailing
+    // assignment operator must not backtrack quadratically (bounded {0,40} runs).
+    const evil = '-'.repeat(200_000) + 'api_key'; // keyword present, no `=`/value
+    const start = performance.now();
+    expect(scanText(evil).detected).toBe(false);
+    expect(performance.now() - start).toBeLessThan(250); // ~ms bounded; unbounded was ~17s
+    // The bound must not cost recall: real assignments are still caught.
+    expect(scanText('MY_API_KEY=abcdefghijklmnopqrstuvwx').detected).toBe(true);
+    expect(scanText('db_secret: "hunter2hunter2"').detected).toBe(true);
+  });
+
   it('null text is a completed scan with nothing to flag', () => {
     const r = runSecretScan('evt_1', null);
     expect(r.secret_scan_passed).toBe(true);

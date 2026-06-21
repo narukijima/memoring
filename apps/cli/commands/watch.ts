@@ -107,14 +107,21 @@ export async function cmdWatch(argv: string[]): Promise<number> {
   });
 
   await new Promise<void>((resolve) => {
-    const shutdown = (): void => {
+    let stopping = false;
+    const shutdown = async (): Promise<void> => {
+      if (stopping) return;
+      stopping = true;
       if (debounce) clearTimeout(debounce);
       for (const w of watchers) w.close();
+      // Wait for an in-flight tick to finish so its ctx.close(true) flushes the blob
+      // and releases the replica lock before we resolve (the caller hard-exits on
+      // resolve). Otherwise a Ctrl-C mid-tick leaks the .lock and drops the tick.
+      while (running) await new Promise((r) => setTimeout(r, 50));
       console.log('\n  Stopped.');
       resolve();
     };
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', () => void shutdown());
+    process.on('SIGTERM', () => void shutdown());
   });
   return 0;
 }

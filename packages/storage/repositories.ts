@@ -72,6 +72,10 @@ export class Store {
   setMeta(key: string, value: string): void {
     this.upsert('meta', { key, value });
   }
+  deleteMeta(key: string): void {
+    this.db.prepare('DELETE FROM meta WHERE key = ?').run(key);
+    this.onWrite();
+  }
 
   // ── source / project / connector instance / session ───────────────────────
   putSource(s: Source): void {

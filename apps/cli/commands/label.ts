@@ -4,6 +4,7 @@
 // silently drops.
 import { replicaLayout } from '@core/paths';
 import { openActiveRealm, type RealmContext } from '@core/runtime';
+import { rebuildIndex } from '@retrieval/search';
 import { normalizeLabel } from '@core/label-normalize';
 import { realmHmac } from '@security/crypto-primitives';
 import type { Label } from '@core/schema/entities';
@@ -71,6 +72,11 @@ function merge(ctx: RealmContext, fromName?: string, intoName?: string): number 
   }
   ctx.store.putLabel({ ...from, state: 'merged', merged_into: into.label_id });
   ctx.chronicler.append('scope_confirm', from.label_id);
+  // The search index stores label_ids as a snapshot taken at index time, so a merge
+  // leaves stale `from` ids in doc_index until rebuilt — context (live assignments)
+  // would see the new scope while search lagged. Rebuild deterministically so both
+  // surfaces agree immediately.
+  rebuildIndex(ctx);
   console.log(`  Merged ${from.canonical_name} → ${into.canonical_name} (${repointed} assignment(s) re-pointed).`);
   return 0;
 }
