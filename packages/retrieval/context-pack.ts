@@ -271,6 +271,23 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
 // bounded by the same allocator, so the whole document stays under token_budget.
 const CONFLICTS_KEY = '__conflicts__';
 const STALE_KEY = '__stale__';
+// The constraints group is the safety floor (§3.6/§3.7): neither the allocator nor
+// the trim loop may drop it. Naming the key once keeps both enforcers in lock-step.
+const CONSTRAINTS_KEY = 'Constraints / do_not_do';
+
+// Allocator reserves, derived empirically under estimateTokens (the §3.6 token
+// estimator). The allocator is only the first-pass cap; the measure-and-trim loop in
+// buildContext is the true ceiling, so these only need to be close — they were
+// re-derived when chars/4 → estimateTokens made per-item content ~3.5× denser.
+//   Scaffold (Safety Header + section headings + scope line + Citations heading +
+//   Ouroboros marker block) measures ≈560–600 est-tokens (the upper end is an
+//   all-"_None._" empty doc; with items rendered the placeholders disappear).
+const SCAFFOLD_RESERVE_TOKENS = 600;
+//   Per rendered+cited item, beyond its statement text: the "- " bullet, the inline
+//   " (clm_…)" citation, and the matching "- clm_…: kind=…, evidence=N" Evidence-Map
+//   line (every rendered claim is cited). Measured 42 est-tokens for a real clm_ id
+//   (was 12 under chars/4, which under-counted the two opaque IDs per item ~3.5×).
+const PER_ITEM_OVERHEAD_TOKENS = 42;
 
 /** §3.7 output priority (high → low). Constraints rank highest; the conflict / stale
  *  WARNINGS rank just below (safety-relevant); then the recall sections. Everything
@@ -283,7 +300,7 @@ function budgetGroups(
 ): Array<{ key: string; items: ScopedClaim[] }> {
   const kind = (t: string) => ({ key: t, items: bySection.get(t) ?? [] });
   return [
-    kind('Constraints / do_not_do'),
+    kind(CONSTRAINTS_KEY),
     { key: CONFLICTS_KEY, items: conflictsOpen },
     { key: STALE_KEY, items: staleOpen },
     kind('Current project facts'),
@@ -296,10 +313,15 @@ function budgetGroups(
 /**
  * Per-group item cap that keeps the whole ContextPack under its token budget (§3.6).
  * Walks groups in §3.7 PRIORITY order (constraints first), so when the budget is
- * tight the low-priority groups lose items while constraints / warnings keep theirs.
- * In practice the 8k–32k budgets dwarf a recall set, so this only bites on a very
- * large corpus — but it makes the §3.6 guarantee real (the manifest token_budget was
- * previously enforced only on the KIND sections, leaving conflicts/stale/citations
+ * tight the low-priority recall groups lose items first. The constraints group is the
+ * safety floor: it is allocated in FULL (up to the density cap) and never bounded by
+ * the remaining budget here — matching the trim loop, which also never drops a
+ * constraint. So a Realm whose constraints alone exceed the budget keeps every
+ * do_not_do rule and goes over the ceiling (the deliberate §3.6/§3.7 trade-off:
+ * safety rules are never pushed out by the budget), rather than silently truncating
+ * them. In practice the 8k–32k budgets dwarf a recall set, so this only bites on a
+ * very large corpus — but it makes the §3.6 guarantee real (the manifest token_budget
+ * was previously enforced only on the KIND sections, leaving conflicts/stale/citations
  * unbounded).
  */
 function allocateSectionCaps(
@@ -308,15 +330,18 @@ function allocateSectionCaps(
   maxPerSection: number,
 ): Map<string, number> {
   const caps = new Map<string, number>();
-  // Reserve a flat overhead for the always-present scaffold (Safety Header, scope
-  // line, section titles, citations heading, Ouroboros marker block).
-  let remaining = budget - 600;
+  let remaining = budget - SCAFFOLD_RESERVE_TOKENS;
   for (const { key, items } of groups) {
+    // The constraints safety floor is allocated unconditionally; only the recall
+    // groups are gated on the remaining budget. Constraints still DEBIT `remaining`
+    // (it may go negative), so lower-priority groups are sized against what is truly
+    // left and correctly get nothing once constraints have spent the budget.
+    const isSafetyFloor = key === CONSTRAINTS_KEY;
     let cap = 0;
     for (const sc of items) {
       if (cap >= maxPerSection) break;
-      const cost = estimateTokens(sc.statement) + 12; // bullet + opaque citation overhead
-      if (remaining - cost < 0) break;
+      const cost = estimateTokens(sc.statement) + PER_ITEM_OVERHEAD_TOKENS;
+      if (!isSafetyFloor && remaining - cost < 0) break;
       remaining -= cost;
       cap += 1;
     }
@@ -344,7 +369,7 @@ function groupByKind(passed: ScopedClaim[]): Map<string, ScopedClaim[]> {
 function trimLowestPriority(caps: Map<string, number>, groups: Array<{ key: string; items: ScopedClaim[] }>): boolean {
   for (let i = groups.length - 1; i >= 0; i--) {
     const g = groups[i]!;
-    if (g.key === 'Constraints / do_not_do') continue; // never trim the safety floor
+    if (g.key === CONSTRAINTS_KEY) continue; // never trim the safety floor
     const cur = caps.get(g.key) ?? 0;
     if (cur > 0) {
       caps.set(g.key, cur - 1);
@@ -421,7 +446,7 @@ function renderMarkdown(
   lines.push('_None (untrusted historical evidence; omitted in this build)._');
   lines.push('');
   renderSection('Procedures');
-  renderSection('Constraints / do_not_do');
+  renderSection(CONSTRAINTS_KEY);
 
   // 9. Open conflicts / stale warnings — NOT current guidance (outdated/contradicted
   //    statements quoted for reconciliation). Bounded by the same token budget.
