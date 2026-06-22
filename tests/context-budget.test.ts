@@ -46,4 +46,38 @@ describe('context.md token budget (§3.6) holds on the real emitted document', (
     expect(doc).toContain('Always use TypeScript strict mode'); // constraints (safety floor) survived
     expect(doc).toContain('memoring:ouroboros'); // marker still present and counted
   });
+
+  it('allocator never truncates the constraints safety floor, even when constraints alone exceed budget', () => {
+    const ctx = seeded.realm.ctx;
+    // Clone the passing consolidated decision into a handful of CONSTRAINTS whose
+    // combined cost alone exceeds the budget. (Synthetic: production caps statements at
+    // 280 chars, so the allocator's truncation branch is unreachable in practice — this
+    // exercises it directly.) Kept at 6 ≤ max_items_per_section=15 so the ONLY thing
+    // that could drop one is the budget, not the density cap.
+    const base = ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated').find((c) => c.kind === 'decision')!;
+    const long = 'Never disable the audit log or bypass the egress gate. '.repeat(100); // ~5.4k chars ≈ 1.35k est-tokens
+    for (let i = 0; i < 6; i++) {
+      const ref = ctx.objects.put(`con_${i}_stmt`, Buffer.from(`Constraint#${i}:: ${long}`, 'utf8')).ref;
+      ctx.store.putClaim({ ...base, claim_id: newId('claim'), kind: 'constraint', status: 'consolidated', statement_ref: ref });
+    }
+
+    const r = buildContext(ctx, {
+      cwd: seeded.projectRoot,
+      outPath: path.join('.memoring', 'context.md'),
+      audience: 'ai_tool',
+      aperture: 'standard',
+    });
+    expect(r.kind).toBe('written');
+    const doc = fs.readFileSync(path.join(seeded.projectRoot, '.memoring', 'context.md'), 'utf8');
+
+    // Every injected constraint renders — the allocator did NOT truncate the floor.
+    for (let i = 0; i < 6; i++) expect(doc).toContain(`Constraint#${i}::`);
+    // The constraints section carries no budget-omitted line (only recall sections may).
+    const section = doc.slice(doc.indexOf('## Constraints / do_not_do'), doc.indexOf('## Open conflicts'));
+    expect(section).not.toContain('omitted to fit the context budget');
+    // Deliberate §3.6/§3.7 trade-off: constraints alone exceed the budget, so the doc is
+    // allowed OVER the ceiling rather than dropping a do_not_do rule (vs the stale case
+    // above, where low-priority recall absorbs the trim and the file stays under budget).
+    expect(estimateTokens(doc)).toBeGreaterThan(BUDGET);
+  });
 });
