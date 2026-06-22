@@ -11,7 +11,7 @@ import { writeRealmConfig, type RealmConnectorConfig, type RealmProjectConfig } 
 import { getConnector } from '@intake/registry';
 import { sourceIdentity } from '@intake/identity';
 import { runLoop, type LoopStats } from '@core/loop';
-import type { DetectedSource } from '@intake/types';
+import type { Connector, DetectedSource } from '@intake/types';
 import type { ConnectorInstance, Project, Source } from '@core/schema/entities';
 import { log } from '@core/log';
 import { ask, getPassphrase } from '../prompt';
@@ -77,6 +77,14 @@ export async function cmdConnect(argv: string[]): Promise<number> {
     console.log(`  ${connector.displayName}: detected ${detection.sources.length} source(s).`);
     for (const note of detection.notes) console.log(`    - ${note}`);
     if (detection.sources.length === 0) return 0;
+
+    // --dry-run: show the Inventory (sources, would-be project, sensitivity hint,
+    // sample count) and the active Realm, then stop. Nothing is persisted — the user
+    // confirms by re-running without the flag (Specification §1.1, G12).
+    if (isDryRun(flags)) {
+      printConnectPreview(ctx.realmId, detection.sources, connector);
+      return 0;
+    }
 
     const selected = await chooseSources(detection.sources, flags);
     if (selected.length === 0) {
@@ -171,6 +179,39 @@ export async function cmdConnect(argv: string[]): Promise<number> {
   } finally {
     ctx.close(true);
   }
+}
+
+/** True when `--dry-run` is present (boolean or value form, mirroring init's
+ *  --passphrase handling so a trailing token never disables the preview). */
+export function isDryRun(flags: ReturnType<typeof parseFlags>): boolean {
+  return flags['dry-run'] === true || typeof flags['dry-run'] === 'string';
+}
+
+/** Estimate how many raw lines/messages a source would yield from `fromCursor`,
+ *  without mutating anything (read() is a pure read). Used by the dry-run preview. */
+export function sampleLineCount(connector: Connector, src: DetectedSource, fromCursor = 0): number {
+  try {
+    return connector
+      .read(src, fromCursor, 'backfill')
+      .reduce((n, c) => n + c.bytes.toString('utf8').split('\n').filter((l) => l.trim().length > 0).length, 0);
+  } catch {
+    return 0;
+  }
+}
+
+function printConnectPreview(realmId: string, sources: DetectedSource[], connector: Connector): void {
+  console.log('  [dry-run] No changes will be made (no source, project, or config is persisted).');
+  console.log(`  Realm: ${realmId}`);
+  console.log(`  Inventory — ${sources.length} source(s) available to connect:`);
+  sources.forEach((s, i) => {
+    const { name } = projectNameFor(s);
+    console.log(
+      `    [${i}] project=${name} source=${s.source_stable_id} sensitivity_hint=${s.sensitivity_hint} ` +
+        `samples=${sampleLineCount(connector, s)} realm_suggestion=${s.suggested_realm ?? '-'} ` +
+        `last_modified=${s.last_modified ?? '?'}`,
+    );
+  });
+  console.log('  [dry-run] Re-run without --dry-run to choose include/exclude + Realm and connect.');
 }
 
 export function printLoopStats(stats: LoopStats): void {

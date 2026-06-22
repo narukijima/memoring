@@ -23,7 +23,8 @@
     "daemon": "tsx apps/daemon/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval": "vitest run tests/recall-eval.test.ts"
   },
   "engines": {
     "node": ">=20 <25"

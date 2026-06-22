@@ -14,7 +14,7 @@ import type { RealmContext } from '@core/runtime';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
-interface RpcRequest {
+export interface RpcRequest {
   jsonrpc: '2.0';
   id?: number | string | null;
   method: string;
@@ -114,6 +114,13 @@ function handleAddCandidate(ctx: RealmContext, args: Record<string, unknown>): u
   ctx.flush();
   ctx.audit('mcp_request', { tool: 'memoring_add_memory_candidate', claim_id: claim.claim_id });
   return toolText(`Added candidate ${claim.claim_id} (will not auto-consolidate without independent evidence).`);
+}
+
+/** Handle one JSON-RPC request and return the serialized response (or null for a
+ *  notification). Exported so the MCP egress surface can be tested directly, not
+ *  only through the stdio loop — every tools/call answer passes the same Gate. */
+export function handleMcpRequest(ctx: RealmContext, req: RpcRequest): string | null {
+  return dispatch(ctx, req);
 }
 
 function dispatch(ctx: RealmContext, req: RpcRequest): string | null {

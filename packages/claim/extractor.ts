@@ -8,7 +8,7 @@ import { SCHEMA_VERSION } from '@core/schema/versions';
 import { normalizeLabel } from '@core/label-normalize';
 import { hmacHex } from '@security/crypto-primitives';
 import { isIndependentEvidenceOrigin, maxSensitivityOf, type Sensitivity } from '@core/schema/enums';
-import { allowedSensitivity, allowedSensitivityState } from '@core/policy';
+import { allowedSensitivity, allowedSensitivityState, allowedScopeState, bestClassificationState } from '@core/policy';
 import { eventSealSignature, matchesActivePatternSeal } from './seal';
 import { log } from '@core/log';
 import type { Claim, Derivation, MemEvent } from '@core/schema/entities';
@@ -79,12 +79,21 @@ export async function abstractEvents(
   // Filter to eligible events and read their text once. Only user-origin events
   // (independent evidence; never context_injected assistant text, Ouroboros) feed
   // abstraction. For an off-device (`remote`) provider the prompt itself is an
-  // egress, so each event must clear the output Gate's remote_ai_processing
-  // predicates: the sensitivity floor AND determination-state, PLUS the suppression
-  // predicates (active status, event-identity Seal, pattern Seal) — so a
-  // forgotten/sealed/redacted event's raw text is never sent off-device. Remote
-  // default-off + scope opt-in are enforced at provider resolution (apps/cli/
-  // provider.ts, docs/adr/0003). A `local` provider stays on-device and is exempt.
+  // egress, so each event must clear the SAME floor the output Gate enforces for
+  // the remote_ai_processing audience — checked on every channel, not just here
+  // (egress parity: context.md runs gate(); search.ts re-checks independently):
+  //   • sensitivity value floor + determination-state (secret/unknown/candidate withheld)
+  //   • SCOPE axis: a classified assignment at inferred/confirmed (allowedScopeState) —
+  //     so an unclassified / candidate-scope event never leaves the device even if a
+  //     policy raised its sensitivity. Mirrors policy.ts classified + allowed_scope_state.
+  //   • secret_scan_passed re-check (the independent guard search.ts uses) — a failed
+  //     scan withholds the raw text rather than trusting an upstream null text_ref.
+  //   • suppression: active status, event-identity Seal, pattern Seal — a
+  //     forgotten/sealed/redacted event's raw text is never sent off-device.
+  // Remote default-off is enforced at provider resolution (apps/cli/provider.ts,
+  // docs/adr/0003); the realm-granularity remote opt-in there authorizes all
+  // connected (classified) scopes — a per-label active-scope allow-list is v0.1
+  // (ADR-0003 Deferred). A `local` provider stays on-device and is exempt.
   const eligible: { event: MemEvent; input: AbstractInput }[] = [];
   for (const event of events) {
     if (!isIndependentEvidenceOrigin(event.origin)) continue;
@@ -92,6 +101,11 @@ export async function abstractEvents(
     if (provider.egress === 'remote') {
       if (!allowedSensitivity(event.sensitivity, 'remote_ai_processing', 'standard')) continue;
       if (!allowedSensitivityState(event.sensitivity_classification_state, 'remote_ai_processing', 'standard')) continue;
+      const scopeState = bestClassificationState(
+        ctx.store.listAssignmentsForTarget('event', event.event_id).map((a) => a.classification_state),
+      );
+      if (!allowedScopeState(scopeState, 'remote_ai_processing', 'standard')) continue; // scope-axis floor
+      if (!ctx.store.getSecretScanForEvent(event.event_id)?.secret_scan_passed) continue; // scan parity with search.ts
       if (event.status !== 'active') continue; // redacted/deleted text never egresses
       const sealed =
         ctx.store.activeSealRulesBySignature(ctx.realmId, eventSealSignature(ctx.realmKey, event.event_identity)).length > 0;

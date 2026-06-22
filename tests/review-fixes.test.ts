@@ -5,6 +5,7 @@ import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { eventIdentity, sessionIdentity, sourceIdentity } from '@intake/identity';
 import { abstractEvents } from '@claim/extractor';
+import { runSecretScan } from '@security/secret-scan';
 import { forgetClaim, redactEventById } from '@security/redaction';
 import { createSealRule, eventSealSignature } from '@claim/seal';
 import { rebuildIndex, searchRealm } from '@retrieval/search';
@@ -65,6 +66,29 @@ function putEvent(
   return e;
 }
 
+/** Give an event the scope assignment + passed secret scan a classified event
+ *  always carries in production, so it clears the remote pre-egress scope/scan
+ *  floor (the suppression check under test is then the only thing that can drop it). */
+function egressReady(ctx: TempRealm['ctx'], event: MemEvent): MemEvent {
+  ctx.store.putAssignment({
+    assignment_id: newId('assignment'),
+    realm_id: ctx.realmId,
+    target_type: 'event',
+    target_id: event.event_id,
+    label_ids: [newId('label')],
+    project_ids: ['proj_test'],
+    classification_state: 'inferred',
+    assigned_by: 'rule:path_git_remote',
+    confidence: 0.9,
+    evidence: event.occurrence_ids,
+    created_by_derivation_id: null,
+    created_at: new Date().toISOString(),
+    schema_version: SCHEMA_VERSION.assignment,
+  });
+  ctx.store.putSecretScan(runSecretScan(event.event_id, 'clean text'));
+  return event;
+}
+
 class RecordingProvider implements MemoryProvider {
   id = 'recording';
   name = 'recording';
@@ -96,8 +120,8 @@ describe('F1 — remote pre-egress gate withholds Sealed events', () => {
 
   it('a remote provider never receives a Sealed event_identity (forgotten content stays off-device)', async () => {
     const ctx = realm.ctx;
-    const open = putEvent(ctx, 'forward this one');
-    const sealed = putEvent(ctx, 'this one was forgotten');
+    const open = egressReady(ctx, putEvent(ctx, 'forward this one'));
+    const sealed = egressReady(ctx, putEvent(ctx, 'this one was forgotten'));
     // Seal the second event_identity (what `forget` does to evidence events).
     createSealRule(ctx, 'event_identity', eventSealSignature(ctx.realmKey, sealed.event_identity));
 

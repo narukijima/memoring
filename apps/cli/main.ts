@@ -13,6 +13,7 @@ import { cmdLabel } from './commands/label';
 import { cmdReprocess } from './commands/reprocess';
 import { cmdWatch } from './commands/watch';
 import { cmdExport } from './commands/export';
+import { cmdRestore } from './commands/restore';
 import { cmdMcp } from './commands/mcp';
 import { cmdRekey } from './commands/rekey';
 
@@ -44,6 +45,7 @@ Usage:
   memoring suppress list|remove <id>     Inspect / release SealRules (user-only).
   memoring reprocess                     Re-parse stored raw (event_identity stays stable).
   memoring export --purpose backup <dir> Full backup copy (incl. secret/unknown; sealed only with --passphrase).
+  memoring restore <backup-dir>          Restore a backup archive into MEMORING_HOME (no re-egress; refuses to clobber).
   memoring mcp                           Start the read-only MCP stdio server (optional, experimental).
   memoring doctor                        Inspect compatibility + file safety (warns only).
 
@@ -104,6 +106,8 @@ async function main(): Promise<number> {
       return cmdWatch(rest);
     case 'export':
       return cmdExport(rest);
+    case 'restore':
+      return cmdRestore(rest);
     case 'mcp':
       return cmdMcp();
     case 'doctor':
