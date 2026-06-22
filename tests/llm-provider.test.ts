@@ -6,8 +6,9 @@ import { abstractEvents } from '@claim/extractor';
 import { consolidateClaim, consolidatePending, statementSimilarity } from '@claim/consolidation';
 import { LlmMemoryProvider, parseCandidates, buildPrompt, type LlmBackend } from '@claim/llm-provider';
 import { OpenAiCompatibleBackend } from '@integrations/llm/openai-compatible';
+import { runSecretScan } from '@security/secret-scan';
 import type { AbstractCandidate, AbstractInput, MemoryProvider } from '@claim/provider';
-import type { MemEvent } from '@core/schema/entities';
+import type { MemEvent, SecretScanResult } from '@core/schema/entities';
 import type { ClassificationState, Origin, Sensitivity } from '@core/schema/enums';
 import { makeTempRealm, type TempRealm } from './helpers';
 
@@ -54,6 +55,43 @@ function putEvent(
   };
   ctx.store.putEvent(e);
   return e;
+}
+
+/** Give an event the SCOPE assignment a classified event always carries in
+ *  production (classify.ts) so the remote pre-egress scope-axis floor passes. */
+function assignScope(event: MemEvent, state: ClassificationState = 'inferred'): MemEvent {
+  const ctx = realm.ctx;
+  ctx.store.putAssignment({
+    assignment_id: newId('assignment'),
+    realm_id: ctx.realmId,
+    target_type: 'event',
+    target_id: event.event_id,
+    label_ids: [newId('label')],
+    project_ids: ['proj_test'],
+    classification_state: state,
+    assigned_by: 'rule:path_git_remote',
+    confidence: 0.9,
+    evidence: event.occurrence_ids,
+    created_by_derivation_id: null,
+    created_at: new Date().toISOString(),
+    schema_version: SCHEMA_VERSION.assignment,
+  });
+  return event;
+}
+
+/** Record a secret-scan result for an event (production: normalize always does). */
+function putScan(event: MemEvent, passed: boolean): MemEvent {
+  const base = runSecretScan(event.event_id, passed ? 'clean text' : null);
+  const scan: SecretScanResult = passed
+    ? base
+    : { ...base, secret_scan_status: 'failed', secret_scan_passed: false };
+  realm.ctx.store.putSecretScan(scan);
+  return event;
+}
+
+/** Production-shaped classified event: scope assignment + passed secret scan. */
+function classified(origin: Origin, text: string, sensitivity: Sensitivity, state: ClassificationState = 'inferred'): MemEvent {
+  return putScan(assignScope(putEvent(origin, text, sensitivity, state)), true);
 }
 
 /** Records every input text it is asked to abstract; proposes nothing. */
@@ -195,11 +233,11 @@ describe('OpenAI-compatible backend', () => {
   });
 });
 
-describe('pre-egress sensitivity gate (remote provider never sees secret/unknown raw text)', () => {
+describe('pre-egress gate (remote provider mirrors the output Gate on every axis)', () => {
   it('a remote provider receives only Gate-allowed (public/internal) events', async () => {
-    const internal = putEvent('user', 'use conventional commits', 'internal');
-    const secret = putEvent('user', 'my api key is hunter2', 'secret');
-    const unknown = putEvent('user', 'undetermined sensitivity blob', 'unknown');
+    const internal = classified('user', 'use conventional commits', 'internal');
+    const secret = classified('user', 'my api key is hunter2', 'secret');
+    const unknown = classified('user', 'undetermined sensitivity blob', 'unknown');
     const remote = new RecordingProvider('remote');
     await abstractEvents(realm.ctx, remote, [internal, secret, unknown]);
     // secret (hard floor) and unknown (Silence) are withheld; only internal egresses.
@@ -207,22 +245,86 @@ describe('pre-egress sensitivity gate (remote provider never sees secret/unknown
   });
 
   it('a local provider is NOT gated (sees secret/unknown too — stays on-device)', async () => {
-    const internal = putEvent('user', 'use conventional commits', 'internal');
-    const secret = putEvent('user', 'my api key is hunter2', 'secret');
-    const unknown = putEvent('user', 'undetermined blob', 'unknown');
+    const internal = classified('user', 'use conventional commits', 'internal');
+    const secret = classified('user', 'my api key is hunter2', 'secret');
+    const unknown = classified('user', 'undetermined blob', 'unknown');
     const local = new RecordingProvider('local');
     await abstractEvents(realm.ctx, local, [internal, secret, unknown]);
     expect(local.seen).toEqual(['use conventional commits', 'my api key is hunter2', 'undetermined blob']);
   });
 
-  it('mirrors the output Gate on determination-state too (candidate-state internal is withheld)', async () => {
-    const inferred = putEvent('user', 'forward me', 'internal', 'inferred');
-    const candidate = putEvent('user', 'withhold me', 'internal', 'candidate'); // value ok, state not inferred/confirmed
+  it('mirrors the output Gate on determination-state too (candidate sensitivity-state is withheld)', async () => {
+    const inferred = classified('user', 'forward me', 'internal', 'inferred');
+    const candidate = classified('user', 'withhold me', 'internal', 'candidate'); // value ok, state not inferred/confirmed
     const remote = new RecordingProvider('remote');
     await abstractEvents(realm.ctx, remote, [inferred, candidate]);
     expect(remote.seen).toEqual(['forward me']);
   });
+
+  it('enforces the SCOPE axis: an unclassified-scope internal event never egresses', async () => {
+    // Internal sensitivity (passes the sensitivity floor) but NO scope assignment —
+    // classified(x) is false, so the central Gate would drop it. The remote channel
+    // must do the same instead of forwarding raw out-of-scope text off-device.
+    const noScope = putScan(putEvent('user', 'leak me off-device', 'internal'), true); // no assignScope
+    const ok = classified('user', 'forward me', 'internal');
+    const remote = new RecordingProvider('remote');
+    await abstractEvents(realm.ctx, remote, [noScope, ok]);
+    expect(remote.seen).toEqual(['forward me']);
+  });
+
+  it('enforces the SCOPE-state floor: a candidate-scope internal event is withheld', async () => {
+    const candidateScope = putScan(assignScope(putEvent('user', 'candidate scope leak', 'internal'), 'candidate'), true);
+    const ok = classified('user', 'forward me', 'internal');
+    const remote = new RecordingProvider('remote');
+    await abstractEvents(realm.ctx, remote, [candidateScope, ok]);
+    expect(remote.seen).toEqual(['forward me']); // remote audience requires scope_state ∈ {inferred,confirmed}
+  });
+
+  it('re-checks secret_scan_passed independently: a failed-scan internal event is withheld', async () => {
+    const failedScan = putScan(assignScope(putEvent('user', 'unscanned secret risk', 'internal')), false);
+    const ok = classified('user', 'forward me', 'internal');
+    const remote = new RecordingProvider('remote');
+    await abstractEvents(realm.ctx, remote, [failedScan, ok]);
+    expect(remote.seen).toEqual(['forward me']); // parity with search.ts:24 — no passed scan ⇒ no egress
+  });
+
+  it('withholds confidential from a remote provider (deny under standard)', async () => {
+    const conf = classified('user', 'customer contract terms', 'confidential');
+    const ok = classified('user', 'forward me', 'internal');
+    const remote = new RecordingProvider('remote');
+    await abstractEvents(realm.ctx, remote, [conf, ok]);
+    expect(remote.seen).toEqual(['forward me']); // confidential is deny on remote (Specification §7.3)
+  });
 });
+
+describe('evidence_count counts only independent origins (G8 — the invariant lifecycle.ts relies on)', () => {
+  it('a non-independent origin restating the same thing never accretes evidence', async () => {
+    // lifecycle.ts uses independent_evidence_count = claim.evidence_count; that only
+    // holds because abstraction never counts a non-independent origin. Pin it so a
+    // future change to the origin filter cannot silently turn the alias into a
+    // host-memory laundering bug.
+    const user = putEvent('user', 'adopt pnpm', 'internal');
+    const assistant = putEvent('assistant', 'adopt pnpm', 'internal'); // laundering attempt: same statement
+    const hostSummary = putEvent('host_summary', 'adopt pnpm', 'internal');
+    const provider = new FixedProvider('local', {
+      kind: 'decision',
+      statement: 'adopt pnpm',
+      confidence: 0.9,
+      mode: 'explicit',
+      sourceIndex: 0,
+    });
+    const res = await abstractEvents(realm.ctx, provider, [user, assistant, hostSummary]);
+    expect(res.newCandidates).toHaveLength(1); // only the user event was abstracted
+    const claim = res.newCandidates[0]!;
+    expect(claim.evidence_count).toBe(1);
+    const origins = claim.evidence_event_identities.map(
+      (eid) => realm.ctx.store.findEventByIdentity(realm.ctx.realmId, eid)!.origin,
+    );
+    expect(origins.every((o) => INDEPENDENT.has(o))).toBe(true); // evidence_count == independent count
+  });
+});
+
+const INDEPENDENT = new Set<Origin>(['user', 'tool_result', 'command_result', 'file_diff', 'external_artifact']);
 
 describe('provider mode drives the validator evidence bar', () => {
   it('an LLM inferred candidate is held to ai_inferred_pattern (cannot consolidate from one event)', async () => {

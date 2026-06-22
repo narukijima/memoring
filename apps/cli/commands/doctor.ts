@@ -1,6 +1,9 @@
-// `memoring doctor` — inspect compatibility (host/format/Parser versions) and
-// file safety, and only warn/suggest. It must NOT change the host tool's
-// settings, retention, or permissions (FR-084).
+// `memoring doctor` — inspect the replica (file safety / permissions, source
+// detection, claim + quarantine counts) and only warn/suggest. v0 does NOT compare
+// host-tool versions (there is no supported-version table yet); an incompatible host
+// format degrades safely through the parser's quarantine arm (G2), surfaced as a
+// count below. doctor must NOT change the host tool's settings, retention, or
+// permissions (FR-084).
 import fs from 'node:fs';
 import { replicaLayout } from '@core/paths';
 import { openActiveRealm, replicaExists } from '@core/runtime';
@@ -44,6 +47,12 @@ export async function cmdDoctor(): Promise<number> {
         `  [info] projects=${ctx.config.projects.length} connectors=${ctx.config.connectors.length} ` +
           `consolidated_claims=${consolidated} candidate_claims=${candidates} quarantined=${quarantined}`,
       );
+      if (quarantined > 0) {
+        console.log(
+          `  [warn] ${quarantined} record(s) quarantined (unparseable / unknown format; raw is preserved, ` +
+            'never lost). After a parser update, `memoring reprocess` re-derives them.',
+        );
+      }
     } finally {
       ctx.close(false);
     }

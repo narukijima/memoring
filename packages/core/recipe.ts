@@ -81,33 +81,14 @@ export const REINFORCEMENT_RECIPE = {
   k: 5,
 } as const;
 
-export const RANKING_RECIPE = {
-  meta: {
-    recipe_id: 'recipe_ranking_v1',
-    recipe_version: '1',
-    owner: 'memoring',
-    reason: 'initial values (Detailed Design §10.3)',
-  } as RecipeMeta,
-  weights: {
-    relevance: 0.35,
-    active_scope_match: 0.2,
-    evidence_quality: 0.15,
-    memory_status_boost: 0.1,
-    recency: 0.08,
-    reinforcement_score: 0.07,
-    sensitivity_penalty: 0.2,
-    cross_scope_penalty: 0.2,
-    redundancy_penalty: 0.1,
-    staleness_penalty: 0.1,
-    conflict_penalty: 0.2,
-  },
-  floors: {
-    floor_sensitivity: 0.1,
-    floor_cross_scope: 0.1,
-    floor_conflict: 0.1,
-    raw_excerpt_share_ceiling: 0.1,
-  },
-} as const;
+// The weighted-ranking model (RANKING_RECIPE: relevance/penalty weights + floors,
+// Detailed Design §10.3) is NOT used in v0 — context.md ranks by reinforcement then
+// recency (context-pack.ts), and v0 emits no raw excerpts, so the raw_excerpt_share
+// ceiling has nothing to gate. It was dead code (imported nowhere). Per YAGNI it is
+// removed here, not wired speculatively; v0.1 reintroduces it together with its
+// consumer (weighted recall / raw-excerpt emission) under CON-017. The §3.6/§3.7
+// "constraints/scope not pushed out" guarantee is enforced concretely by the token
+// budget allocation in context-pack.ts (allocateSectionCaps).
 
 export type ContextPurpose = 'coding_agent_session_start' | 'large_chat_session' | 'deep_research_context';
 
