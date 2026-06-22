@@ -48,10 +48,22 @@ export async function cmdRestore(argv: string[]): Promise<number> {
     console.error(`  backup-manifest.json kind=${manifest.kind ?? '(none)'} is not 'memoring-backup'. Refusing.`);
     return 1;
   }
-  // backup_export is the only purpose that carries full at-rest bytes; a derived
-  // (redacted/dataset) archive is not a restorable replica.
-  if (manifest.purpose && manifest.purpose !== 'backup_export') {
-    console.error(`  Archive purpose=${manifest.purpose} is not restorable (only backup_export). Refusing.`);
+  // Restore is only safe for a full backup_export of the SAME user with client-side
+  // encryption (Specification §6.2 / §7.3). Enforce all three as hard refusals — a
+  // missing/derived purpose, or a non-same-user / non-client-side archive, is not a
+  // restorable replica (a derived redacted/dataset archive may have left the key
+  // boundary and is not a full vault).
+  if (manifest.purpose !== 'backup_export') {
+    console.error(`  Archive purpose=${manifest.purpose ?? '(none)'} is not 'backup_export' — only a full backup is restorable. Refusing.`);
+    return 1;
+  }
+  if (manifest.same_user !== true) {
+    console.error('  Archive is not marked same_user=true — restore is only for your own backup. Refusing.');
+    return 1;
+  }
+  const CLIENT_SIDE = ['passphrase', 'local_key_included'];
+  if (!manifest.encryption || !CLIENT_SIDE.includes(manifest.encryption)) {
+    console.error(`  Archive encryption=${manifest.encryption ?? '(none)'} is not a client-side encrypted replica. Refusing.`);
     return 1;
   }
 
@@ -86,10 +98,17 @@ export async function cmdRestore(argv: string[]): Promise<number> {
   // material). backup-manifest.json is copied too; it is inert metadata.
   fs.cpSync(source, targetRoot, { recursive: true });
   // Re-assert the private permissions the layout expects (cpSync mirrors source
-  // modes, but a backup may have been moved through a permissive transport).
+  // modes, but a backup may have been moved through a permissive transport that left
+  // the key material world-readable). Tighten BOTH key forms — the unwrapped local
+  // key AND the scrypt-wrapped passphrase bundle (a wrapped key is still offline-
+  // attack material) — plus the keys/ dir.
   try {
+    const tl = replicaLayout(targetRoot);
     fs.chmodSync(targetRoot, 0o700);
-    if (fs.existsSync(srcLayout.keyFile)) fs.chmodSync(replicaLayout(targetRoot).keyFile, 0o600);
+    if (fs.existsSync(tl.keysDir)) fs.chmodSync(tl.keysDir, 0o700);
+    for (const keyPath of [tl.keyFile, tl.keyBundle]) {
+      if (fs.existsSync(keyPath)) fs.chmodSync(keyPath, 0o600);
+    }
   } catch {
     /* best-effort; doctor re-checks file safety */
   }
@@ -100,13 +119,13 @@ export async function cmdRestore(argv: string[]): Promise<number> {
   appendAudit(
     replicaLayout(targetRoot).logsDir,
     'backup_restore',
-    { realm_id: manifest.realm_id ?? 'unknown', same_user: manifest.same_user !== false },
+    { realm_id: manifest.realm_id ?? 'unknown', same_user: true }, // validated === true above
     new Date().toISOString(),
   );
 
   const sealed = manifest.self_decrypting === false || manifest.encryption === 'passphrase';
   console.log(`  restored → ${targetRoot}`);
-  console.log(`  realm_id: ${manifest.realm_id ?? '(unknown)'} · same_user: ${manifest.same_user !== false}`);
+  console.log(`  realm_id: ${manifest.realm_id ?? '(unknown)'} · same_user: true`);
   if (sealed) {
     console.log('  Sealed copy: opens only with the original passphrase or recovery code.');
   } else {

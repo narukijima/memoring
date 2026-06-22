@@ -50,6 +50,17 @@ function scoreCitations(doc: string): number {
   return cited.every((id) => rendered.has(id)) ? 1 : 0;
 }
 
+/** Assert every axis meets its threshold so a regression cannot pass with a 0.00 in
+ *  a column nobody checked. Default threshold is 1.0 for all five axes; pass a
+ *  partial override for any scenario where a lower bar is intentional. */
+function expectAxes(scores: Record<string, number>, min: Partial<Record<string, number>> = {}): void {
+  const thresholds: Record<string, number> = { safety: 1, coverage: 1, stale: 1, budget: 1, citation: 1, ...min };
+  for (const [axis, t] of Object.entries(thresholds)) {
+    if (scores[axis] === undefined) continue;
+    expect(scores[axis], `axis ${axis}`).toBeGreaterThanOrEqual(t);
+  }
+}
+
 function staleSection(doc: string): string {
   const start = doc.indexOf('## Open conflicts / stale warnings');
   if (start < 0) return '';
@@ -132,7 +143,7 @@ describe('recall eval harness — context.md quality across 6 scenarios × 5 axe
       citation: scoreCitations(doc),
     };
     report('secret mixed in', scores);
-    expect(scores.safety).toBe(1);
+    expectAxes(scores);
     expect(hits.length).toBe(0); // secret is never indexed → search/MCP can never surface it
   });
 
@@ -151,9 +162,10 @@ describe('recall eval harness — context.md quality across 6 scenarios × 5 axe
       citation: scoreCitations(doc),
     };
     report('stale assumption', scores);
-    expect(scores.stale).toBe(1);
+    expectAxes(scores);
     expect(guidanceSection(doc)).not.toContain(stmt); // not presented as guidance to follow
-    expect(scores.citation).toBe(1);
+    expect(stale).toContain('review required, NOT current guidance'); // §9 is NOT tagged current-guidance
+    expect(stale).toContain('do not follow'); // the stale line is explicitly non-actionable
   });
 
   it('3b. valid_until in the past also surfaces as a stale warning', () => {
@@ -179,7 +191,7 @@ describe('recall eval harness — context.md quality across 6 scenarios × 5 axe
     };
     report('scope mismatch', scores);
     expect(silent.kind).toBe('silence');
-    expect(scores.safety).toBe(1);
+    expectAxes(scores);
   });
 
   it('5. ouroboros re-ingestion — signed marker present; assistant paraphrase never promoted', () => {
@@ -194,7 +206,7 @@ describe('recall eval harness — context.md quality across 6 scenarios × 5 axe
     report('ouroboros re-ingestion', scores);
     expect(doc).toContain('memoring:ouroboros'); // a verbatim re-ingestion would be detected
     expect(textLooksContextInjected(doc)).toBe(true);
-    expect(scores.safety).toBe(1);
+    expectAxes(scores);
     expect(allEvidenceIndependent(seeded.realm.ctx)).toBe(true); // self-generated context never evidence
   });
 
@@ -214,6 +226,6 @@ describe('recall eval harness — context.md quality across 6 scenarios × 5 axe
     };
     report('host_summary mixed in', scores);
     expect(allEvidenceIndependent(ctx)).toBe(true);
-    expect(scores.safety).toBe(1);
+    expectAxes(scores);
   });
 });

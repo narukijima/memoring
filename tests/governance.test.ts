@@ -282,7 +282,7 @@ describe('Open conflicts section (§3.4 not_conflicted_for_request)', () => {
     const doc = fs.readFileSync(path.join(seeded.projectRoot, '.memoring', 'context.md'), 'utf8');
 
     const conflictsSection = doc.slice(doc.indexOf('## Open conflicts'), doc.indexOf('## Citations'));
-    expect(conflictsSection).toContain('(conflict)');
+    expect(conflictsSection).toContain('(conflict — do not follow)'); // §9 is not actionable guidance
     expect(conflictsSection).toContain(decision.claim_id);
 
     // It must NOT leak into normal recall (Recent decisions).

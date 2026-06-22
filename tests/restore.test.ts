@@ -79,4 +79,31 @@ describe('backup → restore round-trip', () => {
     fs.writeFileSync(path.join(notBackup, 'random.txt'), 'hi');
     expect(await cmdRestore([notBackup])).toBe(1);
   });
+
+  it('refuses a manifest that is not a same-user backup_export', async () => {
+    const homeA = path.join(tmp, 'homeA4');
+    const backup = path.join(tmp, 'backup4');
+    process.env.MEMORING_HOME = homeA;
+    expect(await cmdInit([])).toBe(0);
+    expect(await cmdExport(['backup', backup])).toBe(0);
+    const manifestPath = path.join(backup, 'backup-manifest.json');
+    const base = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    process.env.MEMORING_HOME = path.join(tmp, 'homeB4'); // fresh target each time
+
+    // same_user: false → refuse
+    fs.writeFileSync(manifestPath, JSON.stringify({ ...base, same_user: false }));
+    expect(await cmdRestore([backup])).toBe(1);
+    // purpose missing → refuse (only a full backup_export is restorable)
+    fs.writeFileSync(manifestPath, JSON.stringify({ ...base, purpose: undefined }));
+    expect(await cmdRestore([backup])).toBe(1);
+    // unknown (non-client-side) encryption → refuse
+    fs.writeFileSync(manifestPath, JSON.stringify({ ...base, encryption: 'server_side' }));
+    expect(await cmdRestore([backup])).toBe(1);
+    // nothing was restored into the target
+    expect(fs.existsSync(replicaLayout(path.join(tmp, 'homeB4')).dbBlob)).toBe(false);
+
+    // the unmodified manifest still restores (control)
+    fs.writeFileSync(manifestPath, JSON.stringify(base));
+    expect(await cmdRestore([backup])).toBe(0);
+  });
 });
