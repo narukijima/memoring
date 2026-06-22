@@ -9,10 +9,10 @@ import path from 'node:path';
 import { newId } from '@core/schema/ids';
 import { buildContext } from '@retrieval/context-pack';
 import { TOKEN_BUDGET_RECIPE } from '@core/recipe';
+import { estimateTokens } from '@core/token-estimate';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
 
 const BUDGET = TOKEN_BUDGET_RECIPE.budgets.coding_agent_session_start;
-const estTokens = (s: string): number => Math.ceil(s.length / 4);
 
 describe('context.md token budget (§3.6) holds on the real emitted document', () => {
   let seeded: SeededRealm;
@@ -41,7 +41,7 @@ describe('context.md token budget (§3.6) holds on the real emitted document', (
     expect(r.kind).toBe('written');
     const doc = fs.readFileSync(path.join(seeded.projectRoot, '.memoring', 'context.md'), 'utf8');
 
-    expect(estTokens(doc)).toBeLessThanOrEqual(BUDGET); // §3.6: the file does not exceed budget
+    expect(estimateTokens(doc)).toBeLessThanOrEqual(BUDGET); // §3.6: the file does not exceed budget
     expect(doc).toContain('omitted to fit the context budget'); // the trim actually engaged
     expect(doc).toContain('Always use TypeScript strict mode'); // constraints (safety floor) survived
     expect(doc).toContain('memoring:ouroboros'); // marker still present and counted

@@ -16,6 +16,7 @@ import { searchRealm } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { readClaimStatement } from '@claim/extractor';
 import { TOKEN_BUDGET_RECIPE } from '@core/recipe';
+import { estimateTokens } from '@core/token-estimate';
 import { textLooksContextInjected } from '@security/ouroboros';
 import { isIndependentEvidenceOrigin } from '@core/schema/enums';
 import type { RealmContext } from '@core/runtime';
@@ -38,7 +39,7 @@ function scoreCoverage(doc: string, expected: string[]): number {
   return expected.filter((e) => doc.includes(e)).length / expected.length;
 }
 function scoreTokenBudget(doc: string): number {
-  return Math.ceil(doc.length / 4) <= BUDGET ? 1 : 0;
+  return estimateTokens(doc) <= BUDGET ? 1 : 0; // same estimator the budget enforcer uses
 }
 /** Every clm_ id cited in the Evidence Map must have been rendered in a section
  *  above (no dangling citation); an empty doc trivially passes. */
