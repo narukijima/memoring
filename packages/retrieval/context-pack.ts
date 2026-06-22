@@ -11,6 +11,7 @@ import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { resolveActiveProjects } from '@core/realm';
 import { TOKEN_BUDGET_RECIPE, type ContextPurpose } from '@core/recipe';
+import { estimateTokens } from '@core/token-estimate';
 import { log } from '@core/log';
 import { readClaimStatement } from '@claim/extractor';
 import { isClaimSuppressed } from '@claim/seal';
@@ -230,7 +231,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   const render = (): string =>
     `${renderMarkdown(ctx, conflictsOpen, staleOpen, scopeRes.basis, activeLabelIds, audience, aperture, purpose, bySection, caps)}\n\n${markerBlock}\n`;
   let fullDoc = render();
-  for (let guard = 0; estTokens(fullDoc) > budget && trimLowestPriority(caps, groups) && guard < 10000; guard++) {
+  for (let guard = 0; estimateTokens(fullDoc) > budget && trimLowestPriority(caps, groups) && guard < 10000; guard++) {
     fullDoc = render();
   }
 
@@ -270,8 +271,6 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
 // bounded by the same allocator, so the whole document stays under token_budget.
 const CONFLICTS_KEY = '__conflicts__';
 const STALE_KEY = '__stale__';
-
-const estTokens = (s: string): number => Math.ceil(s.length / 4);
 
 /** §3.7 output priority (high → low). Constraints rank highest; the conflict / stale
  *  WARNINGS rank just below (safety-relevant); then the recall sections. Everything
@@ -316,7 +315,7 @@ function allocateSectionCaps(
     let cap = 0;
     for (const sc of items) {
       if (cap >= maxPerSection) break;
-      const cost = estTokens(sc.statement) + 12; // bullet + opaque citation overhead
+      const cost = estimateTokens(sc.statement) + 12; // bullet + opaque citation overhead
       if (remaining - cost < 0) break;
       remaining -= cost;
       cap += 1;
