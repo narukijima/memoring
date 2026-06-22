@@ -195,10 +195,8 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     return b.claim.valid_from.localeCompare(a.claim.valid_from);
   });
 
-  // 4. Assemble fixed sections.
-  const md = renderMarkdown(ctx, passed, conflictsOpen, staleOpen, scopeRes.basis, activeLabelIds, audience, aperture, purpose);
-
-  // 5. ContextPack manifest + signed Ouroboros marker.
+  // 4. Sign the Ouroboros marker first — it is independent of the body, and the
+  //    body's token-budget trim must measure the FULL document (body + marker).
   const packId = newId('contextPack', now.getTime());
   const policyApplied = [
     'active_scope_only',
@@ -217,6 +215,26 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     policy_digest: policyDigest,
     generated_at: now.toISOString(),
   });
+  const markerBlock = renderMarkerBlock(marker);
+
+  // 5. Render the body, then enforce the hard token ceiling (§3.6) on the ACTUAL
+  //    emitted document (body + marker, with real prefixes / omitted lines / Evidence
+  //    Map). The approximate allocator is only the starting point; if the rendered
+  //    file still exceeds budget, trim the lowest-priority group and re-render until it
+  //    fits. Constraints / scope are never trimmed (the safety floor), so a tight
+  //    budget drops low-priority recall, not the do_not_do rules.
+  const budget = TOKEN_BUDGET_RECIPE.budgets[purpose];
+  const bySection = groupByKind(passed);
+  const groups = budgetGroups(bySection, conflictsOpen, staleOpen);
+  const caps = allocateSectionCaps(groups, budget, TOKEN_BUDGET_RECIPE.max_items_per_section);
+  const render = (): string =>
+    `${renderMarkdown(ctx, conflictsOpen, staleOpen, scopeRes.basis, activeLabelIds, audience, aperture, purpose, bySection, caps)}\n\n${markerBlock}\n`;
+  let fullDoc = render();
+  for (let guard = 0; estTokens(fullDoc) > budget && trimLowestPriority(caps, groups) && guard < 10000; guard++) {
+    fullDoc = render();
+  }
+
+  // 6. ContextPack manifest.
   const pack: ContextPack = {
     context_pack_id: packId,
     realm_id: ctx.realmId,
@@ -240,9 +258,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   ctx.store.putContextPack(pack);
   ctx.flush();
 
-  const fullDoc = `${md}\n\n${renderMarkerBlock(marker)}\n`;
-
-  // 6. File safety (gate 7).
+  // 7. File safety (gate 7).
   writeContextFileSafely(opts.outPath, fullDoc, opts.cwd);
 
   ctx.audit('context_pack_generate', { pack_id: packId, emitted: passed.length, dropped, audience, aperture }, now);
@@ -310,17 +326,8 @@ function allocateSectionCaps(
   return caps;
 }
 
-function renderMarkdown(
-  ctx: RealmContext,
-  passed: ScopedClaim[],
-  conflictsOpen: ScopedClaim[],
-  staleOpen: ScopedClaim[],
-  basis: string,
-  activeLabelIds: string[],
-  audience: Audience,
-  aperture: Aperture,
-  purpose: ContextPurpose,
-): string {
+/** Group consolidated claims into their fixed sections by kind (§3.2). */
+function groupByKind(passed: ScopedClaim[]): Map<string, ScopedClaim[]> {
   const bySection = new Map<string, ScopedClaim[]>();
   for (const sc of passed) {
     const section = KIND_SECTION[sc.claim.kind] ?? 'Pinned / consolidated memories';
@@ -328,16 +335,41 @@ function renderMarkdown(
     arr.push(sc);
     bySection.set(section, arr);
   }
+  return bySection;
+}
 
+/** Decrement the cap of the lowest-priority group that still renders an item, NEVER
+ *  the constraints group (the safety floor). Returns false when only constraints have
+ *  items left, so the caller stops trimming. Drives the measure-and-trim loop that
+ *  makes the §3.6 ceiling hold on the ACTUAL emitted document. */
+function trimLowestPriority(caps: Map<string, number>, groups: Array<{ key: string; items: ScopedClaim[] }>): boolean {
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const g = groups[i]!;
+    if (g.key === 'Constraints / do_not_do') continue; // never trim the safety floor
+    const cur = caps.get(g.key) ?? 0;
+    if (cur > 0) {
+      caps.set(g.key, cur - 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+function renderMarkdown(
+  ctx: RealmContext,
+  conflictsOpen: ScopedClaim[],
+  staleOpen: ScopedClaim[],
+  basis: string,
+  activeLabelIds: string[],
+  audience: Audience,
+  aperture: Aperture,
+  purpose: ContextPurpose,
+  bySection: Map<string, ScopedClaim[]>,
+  caps: Map<string, number>,
+): string {
   const activeLabelNames = activeLabelIds
     .map((id) => ctx.store.getLabel(id)?.canonical_name)
     .filter((n): n is string => Boolean(n));
-
-  const caps = allocateSectionCaps(
-    budgetGroups(bySection, conflictsOpen, staleOpen),
-    TOKEN_BUDGET_RECIPE.budgets[purpose],
-    TOKEN_BUDGET_RECIPE.max_items_per_section,
-  );
 
   const lines: string[] = [];
   lines.push('# Memoring context');
