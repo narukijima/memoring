@@ -174,7 +174,7 @@ export function forgetClaim(
   // Drop the dedup key so a later re-derivation produces a FRESH candidate that
   // re-enters validation (where the content Seal, if any, rejects it) instead of
   // silently auto-merging new evidence into this dead claim (§4.15 durability).
-  ctx.store.deleteMeta(claimKeyMeta(ctx.realmKey, claim.kind, statement));
+  ctx.store.deleteMeta(claimKeyMeta(ctx.realmKey, claim.kind, statement, claim.project_ids));
   tombstoneClaimFromPacks(ctx, claimId, now);
   ctx.chronicler.append('redact', claimId, now);
   if (opts.seal !== false) {
