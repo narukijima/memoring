@@ -9,6 +9,7 @@
 // removed); redact excludes from derived/index/output. Creation/release of a
 // SealRule is user-only.
 import type { RealmContext } from '@core/runtime';
+import { log } from '@core/log';
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { isIndependentEvidenceOrigin, type ClaimKind } from '@core/schema/enums';
@@ -51,8 +52,11 @@ export function redactEvent(ctx: RealmContext, event: MemEvent, now = new Date()
   if (event.text_ref) {
     try {
       ctx.objects.delete(event.text_ref);
-    } catch {
-      /* best-effort */
+    } catch (e) {
+      // A failed unlink must not abort the cascade, but it must not be silent:
+      // the recoverable AEAD payload may still be on disk (NFR-002). The ref is an
+      // opaque id (no content), so it is safe to log (NFR-004).
+      log.warn('redact:blob_delete_failed', { ref: event.text_ref, msg: (e as Error).message });
     }
   }
   const updated: MemEvent = { ...event, text_ref: null, status: 'redacted' };
@@ -129,8 +133,10 @@ export function deleteUndiluted(
 
   try {
     ctx.objects.delete(u.encrypted_payload_ref);
-  } catch {
-    /* best-effort */
+  } catch (e) {
+    // Surface, don't swallow: the recoverable payload may still be on disk
+    // (NFR-002). The ref is an opaque id (no content) — safe to log (NFR-004).
+    log.warn('delete:blob_delete_failed', { ref: u.encrypted_payload_ref, msg: (e as Error).message });
   }
   ctx.store.putUndiluted({ ...u, status: 'deleted' });
   tombstone(ctx, undilutedId, 'undiluted', now);
