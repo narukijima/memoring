@@ -28,11 +28,31 @@ function readText(ctx: RealmContext, event: MemEvent): string | null {
   }
 }
 
-/** The persistent dedup-map key for a (kind, statement) pair. Shared by the
- *  abstractor (write/read), `claim correct`, and `forget` (clear) so the format
- *  never drifts across the call sites that must agree on it. */
-export function claimKeyMeta(realmKey: Buffer, kind: string, statement: string): string {
-  return `claimkey:${hmacHex(realmKey, `${kind}\x1f${normalizeLabel(statement)}`)}`;
+/** Canonical scope identity for the dedup key: the project_ids set, deduped and
+ *  sorted so order never affects the key. Empty (unscoped) is its own stable
+ *  bucket. We key by the EXACT project set, not by `sameScope` overlap, because
+ *  overlap is non-transitive ({A} overlaps {A,B} overlaps {B}, but {A}≠{B}) and a
+ *  hash key needs an equivalence. Keying by the exact set never collapses
+ *  non-overlapping scopes (the bug consolidation.sameScope guards against); the
+ *  only residual — a `[A]` vs `[A,B]` near-duplicate — is caught downstream by
+ *  consolidatePending's overlap-aware pass. */
+function claimScopeKey(projectIds: readonly string[]): string {
+  return [...new Set(projectIds)].sort().join(',');
+}
+
+/** The persistent dedup-map key for a (kind, statement, scope) triple. Shared by
+ *  the abstractor (write/read), `claim correct`, and `forget` (clear) so the
+ *  format never drifts across the call sites that must agree on it. Scope is part
+ *  of the key so the same statement under unrelated projects stays separate
+ *  Claims (consolidation.ts §sameScope), instead of the lower-layer auto-merge
+ *  silently collapsing them into the first project's Claim. */
+export function claimKeyMeta(
+  realmKey: Buffer,
+  kind: string,
+  statement: string,
+  projectIds: readonly string[],
+): string {
+  return `claimkey:${hmacHex(realmKey, `${kind}\x1f${normalizeLabel(statement)}\x1f${claimScopeKey(projectIds)}`)}`;
 }
 
 function recordDerivation(ctx: RealmContext, provider: MemoryProvider, event: MemEvent, now: Date): Derivation {
@@ -136,7 +156,12 @@ export async function abstractEvents(
       if (!src) continue; // candidate cites an out-of-range turn → cannot attribute, drop
       const event = src.event;
       const evidenceSensitivity: Sensitivity = maxSensitivityOf([event.sensitivity]);
-      const metaKey = claimKeyMeta(ctx.realmKey, cand.kind, cand.statement);
+      // Scope identity must be known BEFORE the dedup lookup so the same statement
+      // under unrelated projects keys to a different Claim (not silently merged into
+      // the first project's). Assignments are read once here and reused below.
+      const assignments = ctx.store.listAssignmentsForTarget('event', event.event_id);
+      const projectIds = [...new Set(assignments.flatMap((a) => a.project_ids))];
+      const metaKey = claimKeyMeta(ctx.realmKey, cand.kind, cand.statement, projectIds);
       const existingId = ctx.store.getMeta(metaKey);
       const existing = existingId ? ctx.store.getClaim(existingId) : undefined;
       // A redacted/rejected/superseded claim is dead: never accrete evidence into a
@@ -163,7 +188,6 @@ export async function abstractEvents(
       }
       if (existingId && !existingLive) ctx.store.deleteMeta(metaKey);
 
-      const assignments = ctx.store.listAssignmentsForTarget('event', event.event_id);
       const derivation = recordDerivation(ctx, provider, event, now);
       const statementRef = ctx.objects.put(
         `${newId('claim', now.getTime())}_stmt`,
@@ -176,7 +200,7 @@ export async function abstractEvents(
         statement_ref: statementRef,
         structured_predicate_ref: null,
         assignment_ids: assignments.map((a) => a.assignment_id),
-        project_ids: [...new Set(assignments.flatMap((a) => a.project_ids))],
+        project_ids: projectIds,
         abstraction_level: cand.kind === 'preference' || cand.kind === 'constraint' ? 4 : 2,
         status: 'candidate',
         conflict_reason: null,

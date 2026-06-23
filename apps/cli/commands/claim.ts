@@ -79,8 +79,8 @@ function correct(ctx: RealmContext, id?: string, text?: string): number {
   ctx.store.putClaim(updated);
   // Re-key the dedup map: drop the OLD statement's key (else the old text would
   // re-merge into this claim and could never be re-learned) and add the new one.
-  ctx.store.deleteMeta(claimKeyMeta(ctx.realmKey, c.kind, oldStatement));
-  ctx.store.setMeta(claimKeyMeta(ctx.realmKey, c.kind, text), c.claim_id);
+  ctx.store.deleteMeta(claimKeyMeta(ctx.realmKey, c.kind, oldStatement, c.project_ids));
+  ctx.store.setMeta(claimKeyMeta(ctx.realmKey, c.kind, text, c.project_ids), c.claim_id);
   if (secretDetected) ctx.store.indexDelete(c.claim_id);
   else if (updated.status === 'consolidated') indexClaim(ctx, updated);
   console.log(secretDetected ? `  Corrected ${id} (secret detected; output suppressed).` : `  Corrected ${id}.`);

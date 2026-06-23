@@ -443,3 +443,84 @@ describe('near-duplicate suppression at consolidation (§1.5)', () => {
     expect(outcomes.find((o) => o.status === 'conflicted')?.reasons).toContain('duplicate_candidate');
   });
 });
+
+describe('cross-project exact-merge isolation — scope is part of the dedup key', () => {
+  // Give an event a single project scope, mirroring the production classify.ts shape.
+  function assignProject(event: MemEvent, projectId: string): MemEvent {
+    realm.ctx.store.putAssignment({
+      assignment_id: newId('assignment'),
+      realm_id: realm.ctx.realmId,
+      target_type: 'event',
+      target_id: event.event_id,
+      label_ids: [newId('label')],
+      project_ids: [projectId],
+      classification_state: 'inferred',
+      assigned_by: 'rule:path_git_remote',
+      confidence: 0.9,
+      evidence: event.occurrence_ids,
+      created_by_derivation_id: null,
+      created_at: new Date().toISOString(),
+      schema_version: SCHEMA_VERSION.assignment,
+    });
+    return event;
+  }
+
+  // Abstracts every input to the SAME (kind, statement) — the exact collision that,
+  // pre-fix, the scope-blind dedup key merged into the first project's Claim.
+  const sameStatement: MemoryProvider = {
+    id: 'same',
+    name: 'same',
+    version: 'same.v1',
+    egress: 'local',
+    abstract: (inputs: AbstractInput[]): AbstractCandidate[] =>
+      inputs.map((_, i) => ({
+        kind: 'preference' as const,
+        statement: 'Always use TypeScript',
+        confidence: 0.9,
+        mode: 'explicit' as const,
+        sourceIndex: i,
+      })),
+  };
+
+  it('keeps the same statement under unrelated projects as TWO separate, uncontaminated Claims', async () => {
+    const eA = assignProject(putEvent('user', 'turn a', 'internal'), 'proj_a');
+    const eB = assignProject(putEvent('user', 'turn b', 'internal'), 'proj_b');
+
+    const ab = await abstractEvents(realm.ctx, sameStatement, [eA, eB]);
+
+    // Core fix: the lower-layer auto-merge no longer collapses across scopes,
+    // honoring consolidation.ts §sameScope ("must not collapse across projects").
+    expect(ab.newCandidates).toHaveLength(2);
+    expect(ab.merged).toBe(0);
+
+    const cA = ab.newCandidates.find((c) => c.project_ids.includes('proj_a'));
+    const cB = ab.newCandidates.find((c) => c.project_ids.includes('proj_b'));
+    expect(cA).toBeDefined();
+    expect(cB).toBeDefined();
+    expect(cA!.claim_id).not.toBe(cB!.claim_id);
+
+    // Scope is not cross-attributed and evidence is not cross-merged.
+    expect(cA!.project_ids).toEqual(['proj_a']);
+    expect(cB!.project_ids).toEqual(['proj_b']);
+    expect(cA!.evidence_event_identities).toEqual([eA.event_identity]);
+    expect(cB!.evidence_event_identities).toEqual([eB.event_identity]);
+    expect(cA!.evidence_count).toBe(1);
+    expect(cB!.evidence_count).toBe(1);
+  });
+
+  it('still exact-merges the same statement WITHIN one project (intra-scope dedup intact)', async () => {
+    const e1 = assignProject(putEvent('user', 'turn a', 'internal'), 'proj_a');
+    const first = await abstractEvents(realm.ctx, sameStatement, [e1]);
+    expect(first.newCandidates).toHaveLength(1);
+
+    const e2 = assignProject(putEvent('user', 'turn b', 'internal'), 'proj_a');
+    const second = await abstractEvents(realm.ctx, sameStatement, [e2]);
+
+    // Same project + same statement → union evidence into the existing Claim.
+    expect(second.newCandidates).toHaveLength(0);
+    expect(second.merged).toBe(1);
+    const merged = realm.ctx.store.getClaim(first.newCandidates[0]!.claim_id)!;
+    expect(merged.evidence_count).toBe(2);
+    expect(merged.evidence_event_identities).toEqual([e1.event_identity, e2.event_identity]);
+  });
+});
