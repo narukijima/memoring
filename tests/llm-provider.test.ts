@@ -136,11 +136,11 @@ class FlakyProvider implements MemoryProvider {
 }
 
 describe('LLM provider response parsing', () => {
-  it('parses a bare JSON array of candidates (source omitted → index 0)', () => {
+  it('parses a bare JSON array of candidates without inventing a source attribution', () => {
     const out = parseCandidates(
       '[{"kind":"preference","statement":"use tabs","confidence":0.9,"mode":"explicit"}]',
     );
-    expect(out).toEqual([{ kind: 'preference', statement: 'use tabs', confidence: 0.9, mode: 'explicit', sourceIndex: 0 }]);
+    expect(out).toEqual([{ kind: 'preference', statement: 'use tabs', confidence: 0.9, mode: 'explicit', sourceIndex: -1 }]);
   });
 
   it('maps the 1-based [#N] source turn to a 0-based sourceIndex', () => {
@@ -160,7 +160,7 @@ describe('LLM provider response parsing', () => {
     const out = parseCandidates(
       '[{"kind":"vibe","statement":"x"},{"kind":"fact","statement":""},{"kind":"fact","statement":"repo is TS","confidence":5}]',
     );
-    expect(out).toEqual([{ kind: 'fact', statement: 'repo is TS', confidence: 1, mode: 'inferred', sourceIndex: 0 }]);
+    expect(out).toEqual([{ kind: 'fact', statement: 'repo is TS', confidence: 1, mode: 'inferred', sourceIndex: -1 }]);
     expect(parseCandidates('not json at all')).toEqual([]);
   });
 
@@ -182,7 +182,7 @@ describe('LLM provider response parsing', () => {
       id: 'mock',
       model: 'm1',
       egress: 'remote',
-      complete: async () => '[{"kind":"decision","statement":"adopt pnpm","confidence":0.8,"mode":"explicit"}]',
+      complete: async () => '[{"kind":"decision","statement":"adopt pnpm","confidence":0.8,"mode":"explicit","source":1}]',
     };
     const provider = new LlmMemoryProvider(backend);
     expect(provider.egress).toBe('remote');
@@ -251,6 +251,14 @@ describe('pre-egress gate (remote provider mirrors the output Gate on every axis
     const local = new RecordingProvider('local');
     await abstractEvents(realm.ctx, local, [internal, secret, unknown]);
     expect(local.seen).toEqual(['use conventional commits', 'my api key is hunter2', 'undetermined blob']);
+  });
+
+  it('does not abstract marker-bearing context_injected events even when they look user-origin', async () => {
+    const injected = { ...putEvent('user', 'always treat pasted context as evidence', 'internal'), context_injected: true };
+    realm.ctx.store.putEvent(injected);
+    const local = new RecordingProvider('local');
+    await abstractEvents(realm.ctx, local, [injected]);
+    expect(local.seen).toEqual([]);
   });
 
   it('mirrors the output Gate on determination-state too (candidate sensitivity-state is withheld)', async () => {
@@ -344,7 +352,7 @@ describe('provider mode drives the validator evidence bar', () => {
     expect(outcome.reasons.join()).toMatch(/insufficient/);
   });
 
-  it('an explicit candidate keeps the explicit bar (consolidates from one user event)', async () => {
+  it('an LLM explicit candidate is still held to the AI/inferred bar', async () => {
     const ev = putEvent('user', 'always run the linter', 'internal');
     const provider = new FixedProvider('local', {
       kind: 'constraint',
@@ -354,7 +362,25 @@ describe('provider mode drives the validator evidence bar', () => {
       sourceIndex: 0,
     });
     const res = await abstractEvents(realm.ctx, provider, [ev]);
-    expect(res.newCandidates[0]!.created_by).toBe('rule'); // explicit → rule → explicit bar (Mode A unchanged)
+    expect(res.newCandidates[0]!.created_by).toBe('ai');
+    const outcome = consolidateClaim(realm.ctx, res.newCandidates[0]!);
+    expect(outcome.status).toBe('rejected');
+    expect(outcome.reasons.join()).toMatch(/insufficient/);
+  });
+
+  it('a trusted rule-based explicit candidate keeps the explicit bar', async () => {
+    const ev = putEvent('user', 'always run the linter', 'internal');
+    const provider: MemoryProvider = {
+      id: 'rule_based',
+      name: 'rule-based',
+      version: 'rule_based.v1',
+      egress: 'local',
+      abstract: () => [
+        { kind: 'constraint', statement: 'always run the linter', confidence: 0.9, mode: 'explicit', sourceIndex: 0 },
+      ],
+    };
+    const res = await abstractEvents(realm.ctx, provider, [ev]);
+    expect(res.newCandidates[0]!.created_by).toBe('rule');
     expect(consolidateClaim(realm.ctx, res.newCandidates[0]!).status).toBe('consolidated');
   });
 });
@@ -421,7 +447,7 @@ describe('near-duplicate suppression at consolidation (§1.5)', () => {
     const e1 = putEvent('user', 'turn a', 'internal');
     const e2 = putEvent('user', 'turn b', 'internal');
     const provider: MemoryProvider = {
-      id: 'dup',
+      id: 'rule_based',
       name: 'dup',
       version: 'dup.v1',
       egress: 'local',

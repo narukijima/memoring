@@ -13,6 +13,8 @@ import type { Claim } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
 
 const PROTOCOL_VERSION = '2024-11-05';
+export const MAX_JSON_RPC_LINE_BYTES = 1024 * 1024;
+export const MAX_CANDIDATE_STATEMENT_CHARS = 4000;
 
 export interface RpcRequest {
   jsonrpc: '2.0';
@@ -76,6 +78,15 @@ function handleAddCandidate(ctx: RealmContext, args: Record<string, unknown>): u
   const kind = String(args.kind ?? '');
   const statement = String(args.statement ?? '');
   if (!kind || !statement) return toolText('error: kind and statement are required', true);
+  if (statement.length > MAX_CANDIDATE_STATEMENT_CHARS) {
+    ctx.audit('mcp_request', {
+      tool: 'memoring_add_memory_candidate',
+      state: 'rejected',
+      reason: 'statement_too_large',
+      chars: statement.length,
+    });
+    return toolText(`error: statement exceeds ${MAX_CANDIDATE_STATEMENT_CHARS} characters`, true);
+  }
   // Enforce the advertised inputSchema enum at runtime (the hand-rolled dispatcher
   // does not validate inputSchema).
   if (!CLAIM_KINDS.includes(kind as Claim['kind'])) {
@@ -150,6 +161,27 @@ function dispatch(ctx: RealmContext, req: RpcRequest): string | null {
   }
 }
 
+export function handleMcpLine(ctx: RealmContext, line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  if (Buffer.byteLength(trimmed, 'utf8') > MAX_JSON_RPC_LINE_BYTES) {
+    ctx.audit('mcp_request', { tool: 'stdio', state: 'rejected', reason: 'line_too_large', bytes: Buffer.byteLength(trimmed, 'utf8') });
+    return rpcError(null, -32600, 'JSON-RPC line too large');
+  }
+  let req: RpcRequest;
+  try {
+    req = JSON.parse(trimmed) as RpcRequest;
+  } catch {
+    return rpcError(null, -32700, 'Parse error');
+  }
+  try {
+    return dispatch(ctx, req);
+  } catch (e) {
+    if (req.id === undefined) return null;
+    return rpcError(req.id, -32603, (e as Error).message);
+  }
+}
+
 /** Run the stdio JSON-RPC loop until stdin closes. stdout carries only protocol. */
 export function runStdioMcp(ctx: RealmContext): Promise<void> {
   return new Promise((resolve) => {
@@ -157,24 +189,18 @@ export function runStdioMcp(ctx: RealmContext): Promise<void> {
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', (chunk: string) => {
       buffer += chunk;
+      if (Buffer.byteLength(buffer, 'utf8') > MAX_JSON_RPC_LINE_BYTES && !buffer.includes('\n')) {
+        ctx.audit('mcp_request', { tool: 'stdio', state: 'rejected', reason: 'line_too_large', bytes: Buffer.byteLength(buffer, 'utf8') });
+        process.stdout.write(rpcError(null, -32600, 'JSON-RPC line too large') + '\n');
+        buffer = '';
+        return;
+      }
       let nl: number;
       while ((nl = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, nl).trim();
+        const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
-        if (!line) continue;
-        let req: RpcRequest;
-        try {
-          req = JSON.parse(line) as RpcRequest;
-        } catch {
-          process.stdout.write(rpcError(null, -32700, 'Parse error') + '\n');
-          continue;
-        }
-        try {
-          const out = dispatch(ctx, req);
-          if (out) process.stdout.write(out + '\n');
-        } catch (e) {
-          if (req.id !== undefined) process.stdout.write(rpcError(req.id, -32603, (e as Error).message) + '\n');
-        }
+        const out = handleMcpLine(ctx, line);
+        if (out) process.stdout.write(out + '\n');
       }
     });
     process.stdin.on('end', () => resolve());

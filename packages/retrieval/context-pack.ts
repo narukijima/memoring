@@ -14,7 +14,6 @@ import { TOKEN_BUDGET_RECIPE, type ContextPurpose } from '@core/recipe';
 import { estimateTokens } from '@core/token-estimate';
 import { log } from '@core/log';
 import { readClaimStatement } from '@claim/extractor';
-import { recordRecall } from '@claim/recall';
 import { isClaimSuppressed } from '@claim/seal';
 import { validateClaim } from '@claim/validator';
 import { resolveActiveLabelIds } from './active-scope';
@@ -216,15 +215,6 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     }
   }
 
-  recordRecall(
-    ctx,
-    [...passed, ...conflictsOpen, ...staleOpen].map((sc) => sc.claim.claim_id),
-    now,
-  );
-  refreshClaims(ctx, passed);
-  refreshClaims(ctx, conflictsOpen);
-  refreshClaims(ctx, staleOpen);
-
   // 3. Ranking (after the Gate): reinforcement desc, then recency.
   passed.sort((a, b) => {
     const associationTier = Number(a.associated === true) - Number(b.associated === true);
@@ -302,14 +292,6 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
 
   ctx.audit('context_pack_generate', { pack_id: packId, emitted: passed.length, dropped, audience, aperture }, now);
   return { kind: 'written', outPath: opts.outPath, packId, emitted: passed.length, dropped };
-}
-
-function refreshClaims(ctx: RealmContext, scoped: ScopedClaim[]): void {
-  for (let i = 0; i < scoped.length; i += 1) {
-    const current = scoped[i]!;
-    const claim = ctx.store.getClaim(current.claim.claim_id);
-    if (claim) scoped[i] = { ...current, claim };
-  }
 }
 
 // Budget-group keys for the non-KIND sections (conflicts / stale warnings). Every

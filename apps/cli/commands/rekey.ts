@@ -6,7 +6,7 @@
 //     --passphrase               same DEK and printing a one-time recovery code.
 import fs from 'node:fs';
 import { replicaLayout } from '@core/paths';
-import { isPassphraseMode, loadKeyBundle, loadLocalKey, replicaExists } from '@core/runtime';
+import { assertKeyModeUnambiguous, isPassphraseMode, loadKeyBundle, loadLocalKey, replicaExists } from '@core/runtime';
 import { rekeyPassphrase, upgradeLocalToPassphrase } from '@security/key-lifecycle';
 import { atomicWriteFile } from '@storage/fs-safety';
 import { getPassphrase } from '../prompt';
@@ -33,6 +33,12 @@ export async function cmdRekey(argv: string[]): Promise<number> {
   const layout = replicaLayout();
   if (!replicaExists(layout.root)) {
     console.error('No Memoring replica here. Run `memoring init` first.');
+    return 1;
+  }
+  try {
+    assertKeyModeUnambiguous(layout.root);
+  } catch (e) {
+    console.error(`  ${(e as Error).message}`);
     return 1;
   }
 
@@ -65,8 +71,9 @@ export async function cmdRekey(argv: string[]): Promise<number> {
   if (passphrase === null) return 1;
 
   const { bundle, recoveryCode } = upgradeLocalToPassphrase(loadLocalKey(layout), passphrase);
-  // Write the bundle first, then drop the local key file: the runtime detects mode
-  // by which file exists, so after this the replica is in passphrase mode.
+  // Write the bundle first, then drop the local key file. If interrupted in the
+  // middle, runtime refuses the ambiguous two-key state instead of opening the
+  // weaker passwordless mode.
   atomicWriteFile(layout.keyBundle, JSON.stringify(bundle, null, 2), 0o600);
   fs.rmSync(layout.keyFile);
 

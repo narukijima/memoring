@@ -1,5 +1,5 @@
-// Recall accounting for the ContextPack egress path only. This is deliberately
-// separate from valid_recall_count, which remains external re-confirmation only.
+// Recall accounting for explicit external re-confirmation only. ContextPack
+// inclusion itself is not a valid_recall_count or reinforcement signal.
 import type { RealmContext } from '@core/runtime';
 import type { Claim } from '@core/schema/entities';
 import { reinforcement } from './lifecycle';

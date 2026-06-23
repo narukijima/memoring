@@ -106,4 +106,34 @@ describe('backup → restore round-trip', () => {
     fs.writeFileSync(manifestPath, JSON.stringify(base));
     expect(await cmdRestore([backup])).toBe(0);
   });
+
+  it.each([
+    ['logs directory', (backup: string, outside: string) => {
+      fs.rmSync(path.join(backup, 'logs'), { recursive: true, force: true });
+      fs.symlinkSync(outside, path.join(backup, 'logs'), 'dir');
+    }],
+    ['key file', (backup: string, outside: string) => {
+      fs.rmSync(path.join(backup, 'keys', 'key.json'), { force: true });
+      fs.symlinkSync(path.join(outside, 'key.json'), path.join(backup, 'keys', 'key.json'));
+    }],
+    ['objects directory', (backup: string, outside: string) => {
+      fs.rmSync(path.join(backup, 'objects'), { recursive: true, force: true });
+      fs.symlinkSync(outside, path.join(backup, 'objects'), 'dir');
+    }],
+  ])('refuses a backup containing a symlinked %s', async (_name, poison) => {
+    const homeA = path.join(tmp, `home-symlink-src-${_name.replace(/\W+/g, '-')}`);
+    const backup = path.join(tmp, `backup-symlink-${_name.replace(/\W+/g, '-')}`);
+    const homeB = path.join(tmp, `home-symlink-dst-${_name.replace(/\W+/g, '-')}`);
+    const outside = path.join(tmp, `outside-${_name.replace(/\W+/g, '-')}`);
+    fs.mkdirSync(outside, { recursive: true });
+    process.env.MEMORING_HOME = homeA;
+    expect(await cmdInit([])).toBe(0);
+    expect(await cmdExport(['backup', backup])).toBe(0);
+    poison(backup, outside);
+
+    process.env.MEMORING_HOME = homeB;
+    expect(await cmdRestore([backup])).toBe(1);
+    expect(fs.existsSync(path.join(outside, 'audit.log'))).toBe(false);
+    expect(fs.existsSync(replicaLayout(homeB).dbBlob)).toBe(false);
+  });
 });

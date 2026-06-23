@@ -7,6 +7,24 @@ import path from 'node:path';
 import { aeadOpen, aeadSeal, realmHmac } from '@security/crypto-primitives';
 import { atomicWriteFile } from './fs-safety';
 
+const OBJECT_REF_RE = /^objects\/[0-9a-f]{2}\/[0-9a-f]{2}\/[A-Za-z0-9_-]+$/;
+
+export function validateObjectRef(ref: string): void {
+  if (!OBJECT_REF_RE.test(ref)) throw new Error(`Invalid object ref: ${ref}`);
+}
+
+export function objectAbsFromRef(objectsDir: string, ref: string): string {
+  validateObjectRef(ref);
+  const rel = ref.slice('objects/'.length);
+  const root = path.resolve(objectsDir);
+  const abs = path.resolve(root, rel);
+  const containment = path.relative(root, abs);
+  if (containment.startsWith('..') || path.isAbsolute(containment)) {
+    throw new Error(`Object ref escapes objects dir: ${ref}`);
+  }
+  return abs;
+}
+
 export class ObjectStore {
   constructor(
     private readonly objectsDir: string,
@@ -20,32 +38,26 @@ export class ObjectStore {
     return path.posix.join('objects', h.slice(0, 2), h.slice(2, 4), objectId);
   }
 
-  private absFromRef(ref: string): string {
-    // ref is "objects/aa/bb/id"; objectsDir already ends with "objects".
-    const rel = ref.replace(/^objects\//, '');
-    return path.join(this.objectsDir, rel);
-  }
-
   /** Seal a payload; returns { ref, content_fingerprint }. */
   put(objectId: string, payload: Buffer): { ref: string; fingerprint: string } {
     const ref = this.refFor(objectId);
-    const abs = this.absFromRef(ref);
+    const abs = objectAbsFromRef(this.objectsDir, ref);
     atomicWriteFile(abs, aeadSeal(this.dek, payload));
     return { ref, fingerprint: realmHmac(this.realmKey, payload) };
   }
 
   get(ref: string): Buffer {
-    const abs = this.absFromRef(ref);
+    const abs = objectAbsFromRef(this.objectsDir, ref);
     return aeadOpen(this.dek, fs.readFileSync(abs));
   }
 
   exists(ref: string): boolean {
-    return fs.existsSync(this.absFromRef(ref));
+    return fs.existsSync(objectAbsFromRef(this.objectsDir, ref));
   }
 
   /** Physical deletion of the encrypted object (delete cascade, §7.3). */
   delete(ref: string): void {
-    const abs = this.absFromRef(ref);
+    const abs = objectAbsFromRef(this.objectsDir, ref);
     if (fs.existsSync(abs)) fs.rmSync(abs);
   }
 }

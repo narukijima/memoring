@@ -69,6 +69,27 @@ describe('resolveProvider (env-driven provider selection)', () => {
     expect(p.egress).toBe('remote'); // gate stays engaged despite the loopback host
   });
 
+  it('ignores MEMORING_LLM_EGRESS=local when proxy mode is enabled', () => {
+    clearLlmEnv();
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:8787/v1';
+    process.env.MEMORING_LLM_MODEL = 'claude-via-proxy';
+    process.env.MEMORING_LLM_PROXY = '1';
+    process.env.MEMORING_LLM_EGRESS = 'local';
+    process.env.MEMORING_LLM_REMOTE_OPT_IN = '1';
+    const p = resolveProvider();
+    expect(p).toBeInstanceOf(LlmMemoryProvider);
+    expect(p.egress).toBe('remote');
+  });
+
+  it('PROXY=1 plus EGRESS=local still requires the remote opt-in', () => {
+    clearLlmEnv();
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:8787/v1';
+    process.env.MEMORING_LLM_MODEL = 'claude-via-proxy';
+    process.env.MEMORING_LLM_PROXY = '1';
+    process.env.MEMORING_LLM_EGRESS = 'local';
+    expect(resolveProvider()).toBeInstanceOf(RuleBasedProvider);
+  });
+
   it('a proxy without the remote opt-in is refused (default-off), falling back to rule-based', () => {
     clearLlmEnv();
     process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:8787/v1';

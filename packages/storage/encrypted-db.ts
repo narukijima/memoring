@@ -13,6 +13,7 @@ import { aeadOpen, aeadSeal } from '@security/crypto-primitives';
 import { STORE_FORMAT_VERSION } from '@core/schema/versions';
 import { atomicWriteFile } from './fs-safety';
 import { DDL } from './schema-ddl';
+import { objectAbsFromRef, validateObjectRef } from './object-store';
 
 export type Db = Database.Database;
 
@@ -116,17 +117,16 @@ function releaseReplicaLock(lock: ReplicaLock): void {
   }
 }
 
-function objectAbsFromRef(objectsDir: string, ref: string): string {
-  return path.join(objectsDir, ref.replace(/^objects\//, ''));
-}
-
 function objectExists(objectsDir: string, ref: string): boolean {
   return fs.existsSync(objectAbsFromRef(objectsDir, ref));
 }
 
 function collectObjectRefs(value: unknown, refs: Set<string>): void {
   if (typeof value === 'string') {
-    if (value.startsWith('objects/')) refs.add(value);
+    if (value.startsWith('objects/')) {
+      validateObjectRef(value);
+      refs.add(value);
+    }
     return;
   }
   if (Array.isArray(value)) {

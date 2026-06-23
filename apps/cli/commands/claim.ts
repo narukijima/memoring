@@ -26,7 +26,7 @@ export async function cmdClaim(argv: string[]): Promise<number> {
         const claims = ctx.store.listClaims(ctx.realmId);
         if (claims.length === 0) console.log('  No claims.');
         for (const c of claims) {
-          const stmt = readClaimStatement(ctx, c).slice(0, 70);
+          const stmt = claimListStatement(ctx, c);
           console.log(`  ${c.claim_id} [${c.kind}/${c.status}] r=${c.reinforcement_score.toFixed(2)} ${stmt}`);
         }
         return 0;
@@ -45,6 +45,14 @@ export async function cmdClaim(argv: string[]): Promise<number> {
   } finally {
     ctx.close(dirty);
   }
+}
+
+function claimListStatement(ctx: RealmContext, claim: Claim): string {
+  if (claim.status === 'redacted') return '[redacted]';
+  if (claim.sensitivity === 'secret' || claim.sensitivity === 'unknown' || claim.sensitivity === 'confidential') {
+    return `[suppressed:${claim.sensitivity}]`;
+  }
+  return readClaimStatement(ctx, claim).slice(0, 70);
 }
 
 function pin(ctx: RealmContext, id?: string): number {

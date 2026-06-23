@@ -487,7 +487,7 @@ export class Store {
   // defense in depth and stops rejected/other rows from crowding out in-scope
   // ones before the JS scope/Seal filter). ORDER BY makes truncation deterministic.
   private static readonly CANDIDATE_FILTER =
-    `sensitivity NOT IN ('secret','unknown') AND scope_state IN ('candidate','inferred','confirmed','conflicted')`;
+    `sensitivity NOT IN ('secret','unknown') AND scope_state IN ('candidate','inferred','confirmed')`;
   private static readonly SEARCH_CAP = 1000;
 
   /** Exact / substring match via LIKE on normalized text (handles short CJK). */

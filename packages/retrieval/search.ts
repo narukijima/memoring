@@ -3,11 +3,11 @@
 // (no plaintext index on disk). Index build happens only after Secret Scan;
 // secret/unknown are never indexed (CON-007). Search candidates exclude
 // unclassified and out-of-active-scope items.
-import { CLASSIFIED_STATES, type ClassificationState } from '@core/schema/enums';
+import type { ClassificationState } from '@core/schema/enums';
 import { normalizeLabel } from '@core/label-normalize';
 import { readClaimStatement } from '@claim/extractor';
 import { eventSealSignature, isClaimSuppressed, matchesActivePatternSeal } from '@claim/seal';
-import { activeScopeContainsAll, bestClassificationState } from '@core/policy';
+import { activeScopeContainsAll, allowedScopeState, bestClassificationState } from '@core/policy';
 import type { Claim, MemEvent } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
 import type { IndexHit } from '@storage/repositories';
@@ -127,7 +127,8 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
     // Confidential is excluded on every search/MCP egress surface (Specification §4);
     // the context.md Gate adjudicates confidential separately (one-shot confirm).
     if (hit.sensitivity === 'secret' || hit.sensitivity === 'unknown' || hit.sensitivity === 'confidential') continue;
-    if (!CLASSIFIED_STATES.has(hit.scope_state as ClassificationState)) continue;
+    if (!allowedScopeState(hit.scope_state as ClassificationState, 'ai_tool', 'standard')) continue;
+    if (hit.scope_state === 'conflicted') continue;
     // Query-time Seal gate (defense in depth; also covers the MCP egress surface and
     // any stale index entry that predates a Seal — e.g. before a deterministic rebuild).
     if (matchesActivePatternSeal(ctx, hit.norm_text)) continue;
