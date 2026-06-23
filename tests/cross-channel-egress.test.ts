@@ -16,8 +16,10 @@ import { forgetClaim } from '@security/redaction';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
+import { eventIdentity, sessionIdentity, sourceIdentity } from '@intake/identity';
+import { runSecretScan } from '@security/secret-scan';
 import type { AbstractCandidate, AbstractInput, MemoryProvider } from '@claim/provider';
-import type { Sensitivity } from '@core/schema/enums';
+import type { ClassificationState, Sensitivity } from '@core/schema/enums';
 import type { Claim, MemEvent } from '@core/schema/entities';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
 
@@ -125,6 +127,59 @@ function putScopedClaim(
   return claim;
 }
 
+function remoteTestEvent(seeded: SeededRealm, text: string, scopeState?: ClassificationState): MemEvent {
+  const ctx = seeded.realm.ctx;
+  const src = sourceIdentity(ctx.realmKey, 'test', `src-${text}`);
+  const ses = sessionIdentity(ctx.realmKey, src, `ses-${text}`);
+  const eventId = newId('event');
+  const ref = ctx.objects.put(`${eventId}_text`, Buffer.from(text, 'utf8')).ref;
+  const event: MemEvent = {
+    event_id: eventId,
+    event_identity: eventIdentity(ctx.realmKey, src, ses, eventId, text),
+    realm_id: ctx.realmId,
+    occurrence_ids: [newId('occurrence')],
+    session_id: `ses_${eventId}`,
+    turn_id: null,
+    event_type: 'message',
+    role: 'user',
+    origin: 'user',
+    created_at: new Date().toISOString(),
+    source_timestamp: null,
+    timestamp_confidence: 'capture_observed',
+    sequence: 10_000,
+    text_ref: ref,
+    source_extra_ref: null,
+    sensitivity: 'internal',
+    sensitivity_classification_state: 'inferred',
+    context_injected: false,
+    context_pack_digest: null,
+    parser_version: 'test.v1',
+    status: 'active',
+    schema_version: SCHEMA_VERSION.event,
+  };
+  ctx.store.putEvent(event);
+  ctx.store.putSecretScan(runSecretScan(event.event_id, text));
+  if (scopeState) {
+    const labels = resolveActiveLabelIds(ctx, ['proj_test']);
+    ctx.store.putAssignment({
+      assignment_id: newId('assignment'),
+      realm_id: ctx.realmId,
+      target_type: 'event',
+      target_id: event.event_id,
+      label_ids: [labels[0]!],
+      project_ids: ['proj_test'],
+      classification_state: scopeState,
+      assigned_by: 'rule:path_git_remote',
+      confidence: 0.9,
+      evidence: event.occurrence_ids,
+      created_by_derivation_id: null,
+      created_at: new Date().toISOString(),
+      schema_version: SCHEMA_VERSION.assignment,
+    });
+  }
+  return event;
+}
+
 describe('cross-channel egress parity (G3/G4/G5 across context.md + search + MCP + remote)', () => {
   let seeded: SeededRealm;
   beforeEach(async () => {
@@ -148,6 +203,22 @@ describe('cross-channel egress parity (G3/G4/G5 across context.md + search + MCP
     const remote = new RecordingProvider('remote');
     await abstractEvents(ctx, remote, [secretEvent!]);
     expect(remote.seen).toHaveLength(0);
+  });
+
+  it('remote pre-egress checks the same floor predicates as the local Gate', async () => {
+    const ctx = seeded.realm.ctx;
+    const secretEvent = ctx.store.listEvents(ctx.realmId).find((e) => e.sensitivity === 'secret')!;
+    const unclassified = remoteTestEvent(seeded, 'unclassified remote leak');
+    const candidateScope = remoteTestEvent(seeded, 'candidate-scope remote leak', 'candidate');
+    const safe = remoteTestEvent(seeded, 'remote floor parity safe event', 'inferred');
+
+    const remote = new RecordingProvider('remote');
+    await abstractEvents(ctx, remote, [secretEvent, unclassified, candidateScope, safe]);
+
+    expect(remote.seen).toEqual(['remote floor parity safe event']);
+    expect(remote.seen).not.toContain(SECRET);
+    expect(remote.seen).not.toContain('unclassified remote leak');
+    expect(remote.seen).not.toContain('candidate-scope remote leak');
   });
 
   it('out-of-active-scope content is fail-closed on every query channel', () => {

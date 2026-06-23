@@ -7,7 +7,7 @@ import { CLASSIFIED_STATES, type ClassificationState } from '@core/schema/enums'
 import { normalizeLabel } from '@core/label-normalize';
 import { readClaimStatement } from '@claim/extractor';
 import { eventSealSignature, isClaimSuppressed, matchesActivePatternSeal } from '@claim/seal';
-import { bestClassificationState } from '@core/policy';
+import { activeScopeContainsAll, bestClassificationState } from '@core/policy';
 import type { Claim, MemEvent } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
 import type { IndexHit } from '@storage/repositories';
@@ -133,7 +133,9 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
     if (matchesActivePatternSeal(ctx, hit.norm_text)) continue;
     if (hitIsSealed(ctx, hit)) continue;
     const labels: string[] = JSON.parse(hit.label_ids);
-    if (!labels.some((l) => active.has(l))) continue; // out-of-scope excluded (always enforced)
+    if (hit.ref_type === 'claim') {
+      if (!activeScopeContainsAll(labels, opts.activeLabelIds ?? [])) continue;
+    } else if (!labels.some((l) => active.has(l))) continue; // event seed path keeps some() matching
     out.push({
       ref_id: hit.ref_id,
       ref_type: hit.ref_type,
