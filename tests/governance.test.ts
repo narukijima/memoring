@@ -242,7 +242,12 @@ describe('claim correction safety', () => {
 
     seeded.realm.ctx = openRealmLocal(seeded.realm.root);
     const reopened = seeded.realm.ctx;
-    expect(reopened.store.getClaim(decision.claim_id)?.sensitivity).toBe('secret');
+    expect(reopened.store.getClaim(decision.claim_id)?.status).toBe('superseded');
+    const replacement = reopened
+      .store
+      .listClaims(reopened.realmId)
+      .find((c) => c.supersedes.includes(decision.claim_id));
+    expect(replacement?.sensitivity).toBe('secret');
     expect(searchRealm(reopened, secret, { activeLabelIds: resolveActiveLabelIds(reopened, ['proj_test']) })).toEqual([]);
 
     const result = buildContext(reopened, { cwd: seeded.projectRoot, outPath: path.join('.memoring', 'context.md') });

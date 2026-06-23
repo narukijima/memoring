@@ -233,6 +233,27 @@ describe('F6 — a forgotten statement is not auto-merged back into the dead cla
     expect(second.newCandidates).toHaveLength(1);
     expect(second.newCandidates[0]!.claim_id).not.toBe(first.newCandidates[0]!.claim_id);
   });
+
+  it('re-deriving a superseded statement records the temporal supersedes edge', async () => {
+    const ctx = realm.ctx;
+    const provider = new FixedProvider({
+      kind: 'constraint',
+      statement: 'always run the linter',
+      confidence: 0.9,
+      mode: 'explicit',
+      sourceIndex: 0,
+    });
+    const first = await abstractEvents(ctx, provider, [putEvent(ctx, 'always run the linter')]);
+    const old = first.newCandidates[0]!;
+    ctx.store.putClaim({ ...old, status: 'superseded' });
+
+    const second = await abstractEvents(ctx, provider, [putEvent(ctx, 'always run the linter again')]);
+
+    expect(second.merged).toBe(0);
+    expect(second.newCandidates).toHaveLength(1);
+    expect(second.newCandidates[0]!.claim_id).not.toBe(old.claim_id);
+    expect(second.newCandidates[0]!.supersedes).toEqual([old.claim_id]);
+  });
 });
 
 // ── F9: KEK rotation preserves realm_key (identities/Seals survive) ────────────

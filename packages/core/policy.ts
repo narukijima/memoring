@@ -71,6 +71,12 @@ export function activeScopeMatch(item: GateItem, req: GateRequest): boolean {
   return item.labelIds.some((l) => active.has(l));
 }
 
+export function activeScopeContainsAll(labelIds: string[], activeLabelIds: string[]): boolean {
+  if (labelIds.length === 0 || activeLabelIds.length === 0) return false;
+  const active = new Set(activeLabelIds);
+  return labelIds.every((l) => active.has(l));
+}
+
 /** allowed_scope_state — whether a candidate scope may be emitted (§3.4). */
 export function allowedScopeState(state: ClassificationState | null, audience: Audience, aperture: Aperture): boolean {
   if (state === null) return false;
