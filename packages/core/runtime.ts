@@ -25,6 +25,15 @@ export class ReplicaNotFoundError extends Error {
   }
 }
 
+export class AmbiguousKeyModeError extends Error {
+  constructor(root: string) {
+    super(
+      `Ambiguous Memoring key mode at ${root}: both keys/key.json and keys/keybundle.json exist. Repair the replica before opening.`,
+    );
+    this.name = 'AmbiguousKeyModeError';
+  }
+}
+
 export class RealmContext {
   constructor(
     readonly layout: ReplicaLayout,
@@ -63,6 +72,13 @@ export function replicaExists(root?: string): boolean {
   return fs.existsSync(layout.realmToml) && (fs.existsSync(layout.keyFile) || fs.existsSync(layout.keyBundle));
 }
 
+export function assertKeyModeUnambiguous(root?: string): void {
+  const layout = replicaLayout(root);
+  if (fs.existsSync(layout.keyFile) && fs.existsSync(layout.keyBundle)) {
+    throw new AmbiguousKeyModeError(layout.root);
+  }
+}
+
 /** A replica is in passphrase mode when it has a key bundle and no local key file. */
 export function isPassphraseMode(root?: string): boolean {
   const layout = replicaLayout(root);
@@ -90,6 +106,7 @@ function buildContext(layout: ReplicaLayout, config: RealmConfig, keyring: Keyri
 export function openRealm(passphrase: string, root?: string): RealmContext {
   const layout = replicaLayout(root);
   if (!replicaExists(root)) throw new ReplicaNotFoundError(layout.root);
+  assertKeyModeUnambiguous(root);
   const config = readRealmConfig(layout.realmToml);
   const keyring = unlockWithPassphrase(loadKeyBundle(layout), passphrase);
   return buildContext(layout, config, keyring);
@@ -99,6 +116,7 @@ export function openRealm(passphrase: string, root?: string): RealmContext {
 export function openRealmLocal(root?: string): RealmContext {
   const layout = replicaLayout(root);
   if (!replicaExists(root)) throw new ReplicaNotFoundError(layout.root);
+  assertKeyModeUnambiguous(root);
   const config = readRealmConfig(layout.realmToml);
   const keyring = unlockFromLocalKey(loadLocalKey(layout));
   return buildContext(layout, config, keyring);
@@ -116,6 +134,7 @@ export async function openActiveRealm(
   passphraseProvider: () => Promise<string>,
 ): Promise<RealmContext> {
   const layout = replicaLayout(root);
+  assertKeyModeUnambiguous(root);
   if (fs.existsSync(layout.keyFile)) return openRealmLocal(root);
   if (fs.existsSync(layout.keyBundle)) return openRealm(await passphraseProvider(), root);
   throw new ReplicaNotFoundError(layout.root);

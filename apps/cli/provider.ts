@@ -39,13 +39,14 @@ export function resolveProvider(): MemoryProvider {
     // is `remote` egress even on a loopback URL. Default to remote so the
     // pre-egress gate (extractor.ts) stays engaged; the loopback→local heuristic
     // would otherwise be a silent bypass. An explicit MEMORING_LLM_EGRESS=local
-    // here tells the gate the data stays on-device when it does not — allow, but
-    // flag it loudly.
+    // is unsafe here, so proxy mode forces remote and then applies the normal
+    // remote default-off gate.
     if (egress === undefined) egress = 'remote';
     else if (egress === 'local') {
       console.error(
-        '  [warn] MEMORING_LLM_EGRESS=local with a forwarding proxy bypasses the pre-egress gate — raw text still leaves the device.',
+        '  [warn] MEMORING_LLM_EGRESS=local ignored because MEMORING_LLM_PROXY forwards raw text off-device; treating egress as remote.',
       );
+      egress = 'remote';
     }
   }
 

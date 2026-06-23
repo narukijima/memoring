@@ -89,9 +89,12 @@ export function parseCandidates(raw: string): AbstractCandidate[] {
     if (typeof o.kind !== 'string' || !kinds.has(o.kind) || statement.length === 0) continue;
     const confidence = Math.min(1, Math.max(0, typeof o.confidence === 'number' ? o.confidence : 0.7));
     // The model cites a 1-based [#N] turn; convert to a 0-based input index.
-    // Missing/invalid → 0 (the caller drops it if out of range for the batch).
+    // Missing/invalid is not attributed to turn 0; the caller drops it as
+    // out-of-range instead of inventing evidence authority.
     const sourceIndex =
-      typeof o.source === 'number' && Number.isFinite(o.source) ? Math.max(0, Math.floor(o.source) - 1) : 0;
+      typeof o.source === 'number' && Number.isFinite(o.source) && o.source >= 1
+        ? Math.floor(o.source) - 1
+        : -1;
     out.push({
       kind: o.kind as ClaimKind,
       statement: statement.slice(0, 280),

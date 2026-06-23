@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { searchRealm, rebuildIndex, indexEvent } from '@retrieval/search';
+import { handleMcpRequest } from '@retrieval/mcp';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { eventIdentity, sessionIdentity, sourceIdentity } from '@intake/identity';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
+import { runSecretScan } from '@security/secret-scan';
 import type { Assignment, MemEvent } from '@core/schema/entities';
 
 let seeded: SeededRealm;
@@ -100,5 +102,68 @@ describe('search (FR-040..042, NFR-018)', () => {
     indexEvent(ctx, event);
 
     expect(searchRealm(ctx, 'UNSCANNED_DATABASE_PASSWORD', { activeLabelIds: active })).toEqual([]);
+  });
+
+  it('excludes conflicted-scope event snippets from search and MCP', () => {
+    const ctx = seeded.realm.ctx;
+    const text = 'conflicted-scope-search-leak';
+    const src = sourceIdentity(ctx.realmKey, 'claude_code', 'conflicted-src');
+    const ses = sessionIdentity(ctx.realmKey, src, 'conflicted-session');
+    const eventId = newId('event');
+    const textRef = ctx.objects.put(`${eventId}_text`, Buffer.from(text, 'utf8')).ref;
+    const event: MemEvent = {
+      event_id: eventId,
+      event_identity: eventIdentity(ctx.realmKey, src, ses, 'conflicted-message', text),
+      realm_id: ctx.realmId,
+      occurrence_ids: [newId('occurrence')],
+      session_id: 'ses_conflicted_scope',
+      turn_id: null,
+      event_type: 'message',
+      role: 'user',
+      origin: 'user',
+      created_at: new Date().toISOString(),
+      source_timestamp: null,
+      timestamp_confidence: 'capture_observed',
+      sequence: 1000,
+      text_ref: textRef,
+      source_extra_ref: null,
+      sensitivity: 'internal',
+      sensitivity_classification_state: 'inferred',
+      context_injected: false,
+      context_pack_digest: null,
+      parser_version: 'test.v1',
+      status: 'active',
+      schema_version: SCHEMA_VERSION.event,
+    };
+    ctx.store.putEvent(event);
+    ctx.store.putSecretScan(runSecretScan(event.event_id, text));
+    ctx.store.putAssignment({
+      assignment_id: newId('assignment'),
+      realm_id: ctx.realmId,
+      target_type: 'event',
+      target_id: eventId,
+      label_ids: [active[0]!],
+      project_ids: ['proj_test'],
+      classification_state: 'conflicted',
+      assigned_by: 'rule:path_git_remote',
+      confidence: 1,
+      evidence: [event.occurrence_ids[0]!],
+      created_by_derivation_id: null,
+      created_at: new Date().toISOString(),
+      schema_version: SCHEMA_VERSION.assignment,
+    });
+
+    indexEvent(ctx, event);
+
+    expect(searchRealm(ctx, text, { activeLabelIds: active })).toEqual([]);
+    const resp = handleMcpRequest(ctx, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'memoring_search', arguments: { query: text, scope: 'memoring-proj' } },
+    });
+    const body = JSON.parse(resp!);
+    expect(body.result.content[0].text).toContain('No matches.');
+    expect(body.result.content[0].text).not.toContain(text);
   });
 });

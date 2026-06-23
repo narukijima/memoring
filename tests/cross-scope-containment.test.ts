@@ -19,7 +19,7 @@ import type { AbstractCandidate, AbstractInput, MemoryProvider } from '@claim/pr
 import type { Label, MemEvent } from '@core/schema/entities';
 
 class SameStatementProvider implements MemoryProvider {
-  id = 'same';
+  id = 'rule_based';
   name = 'same';
   version = 'same.v1';
   egress = 'local' as const;

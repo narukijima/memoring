@@ -36,7 +36,7 @@ describe('reinforcement invariant (§4.8 / CON-019)', () => {
     const e5 = reinforcement({ ...base, current: 0, independent_evidence_count: 5 });
     expect(e5).toBeGreaterThan(e1);
   });
-  it('build-context recall counter drives monotonic reinforcement without valid_recall_count', () => {
+  it('explicit external recall accounting drives monotonic reinforcement', () => {
     const realm = makeTempRealm();
     try {
       const claim: Claim = {

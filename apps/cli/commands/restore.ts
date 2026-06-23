@@ -82,6 +82,12 @@ export async function cmdRestore(argv: string[]): Promise<number> {
     console.error(`  Incomplete backup — missing: ${parts.join(', ')}. Refusing.`);
     return 1;
   }
+  try {
+    validateBackupTree(source);
+  } catch (e) {
+    console.error(`  Unsafe backup layout: ${(e as Error).message}. Refusing.`);
+    return 1;
+  }
 
   // Never clobber an existing vault. The user picks the destination by pointing
   // MEMORING_HOME at an empty/new directory (the same root every other command
@@ -97,6 +103,13 @@ export async function cmdRestore(argv: string[]): Promise<number> {
   // Copy the encrypted replica verbatim (preserves the AEAD blob, objects, and key
   // material). backup-manifest.json is copied too; it is inert metadata.
   fs.cpSync(source, targetRoot, { recursive: true });
+  try {
+    validateRestoredLayout(targetRoot);
+  } catch (e) {
+    fs.rmSync(targetRoot, { recursive: true, force: true });
+    console.error(`  Unsafe restored layout: ${(e as Error).message}. Refusing.`);
+    return 1;
+  }
   // Re-assert the private permissions the layout expects (cpSync mirrors source
   // modes, but a backup may have been moved through a permissive transport that left
   // the key material world-readable). Tighten BOTH key forms — the unwrapped local
@@ -133,4 +146,68 @@ export async function cmdRestore(argv: string[]): Promise<number> {
   }
   console.log('  No re-egress or re-derivation occurred. Run `memoring doctor` to verify.');
   return 0;
+}
+
+function validateBackupTree(root: string): void {
+  const realRoot = fs.realpathSync(root);
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir)) {
+      if (entry === '.' || entry === '..' || path.isAbsolute(entry) || entry.includes(path.sep)) {
+        throw new Error(`invalid path entry ${entry}`);
+      }
+      const abs = path.join(dir, entry);
+      const rel = path.relative(realRoot, path.resolve(abs));
+      if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`escaped path ${entry}`);
+      const st = fs.lstatSync(abs);
+      if (st.isSymbolicLink()) throw new Error(`${rel} is a symlink`);
+      if (st.isFile()) {
+        if (st.nlink > 1) throw new Error(`${rel} is a hardlink`);
+        continue;
+      }
+      if (st.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      throw new Error(`${rel} is not a regular file or directory`);
+    }
+  };
+  walk(realRoot);
+}
+
+function validateRestoredLayout(targetRoot: string): void {
+  const layout = replicaLayout(targetRoot);
+  const root = fs.realpathSync(targetRoot);
+  const paths = [
+    layout.root,
+    layout.realmToml,
+    layout.dbBlob,
+    layout.objectsDir,
+    layout.indexesDir,
+    layout.connectorsDir,
+    layout.policiesDir,
+    layout.logsDir,
+    layout.keysDir,
+    layout.keyBundle,
+    layout.keyFile,
+  ];
+  for (const p of paths) assertPathInsideRoot(root, p);
+}
+
+function assertPathInsideRoot(realRoot: string, target: string): void {
+  const resolved = resolveExistingOrParent(target);
+  const rel = path.relative(realRoot, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`${target} resolves outside target root`);
+}
+
+function resolveExistingOrParent(target: string): string {
+  let cur = path.resolve(target);
+  const missing: string[] = [];
+  while (!fs.existsSync(cur)) {
+    missing.unshift(path.basename(cur));
+    const parent = path.dirname(cur);
+    if (parent === cur) throw new Error(`${target} has no existing parent`);
+    cur = parent;
+  }
+  const real = fs.realpathSync(cur);
+  return path.resolve(real, ...missing);
 }

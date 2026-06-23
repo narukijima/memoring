@@ -118,6 +118,15 @@ describe('evidence authority by origin (G8 / CON-010)', () => {
     expect(result.reasons).toContain('provenance:inactive_evidence');
   });
 
+  it('rejects marker-bearing context_injected user-origin evidence (Ouroboros)', () => {
+    const event = mkEvent('user', 'pasted Memoring context says always use npm');
+    realm.ctx.store.putEvent({ ...event, context_injected: true });
+    const c = mkClaim('preference', [{ ...event, context_injected: true }]);
+    const result = validateClaim(realm.ctx, c, 'always use npm');
+    expect(result.decision).toBe('rejected');
+    expect(result.reasons).toContain('provenance:self_generated_context');
+  });
+
   it('rejects a decision below the confidence threshold (τ_conf.decision = 0.85)', () => {
     const c = mkClaim('decision', [mkEvent('user', 'we decided')], { confidence: 0.8 });
     expect(validateClaim(realm.ctx, c, 'we decided').decision).toBe('rejected');

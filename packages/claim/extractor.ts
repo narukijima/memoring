@@ -118,6 +118,7 @@ export async function abstractEvents(
   for (const event of events) {
     if (!isIndependentEvidenceOrigin(event.origin)) continue;
     if (event.origin !== 'user') continue; // v0 heuristics target explicit user statements
+    if (event.context_injected) continue; // Ouroboros: marker-bearing sessions are not abstraction evidence in v0
     if (provider.egress === 'remote') {
       if (!allowedSensitivity(event.sensitivity, 'remote_ai_processing', 'standard')) continue;
       if (!allowedSensitivityState(event.sensitivity_classification_state, 'remote_ai_processing', 'standard')) continue;
@@ -207,12 +208,10 @@ export async function abstractEvents(
         conflict_reason: null,
         evidence_event_identities: [event.event_identity],
         evidence_occurrence_ids: [...event.occurrence_ids],
-        // Provenance drives the validator's evidence bar (validator.ts): an
-        // `inferred` candidate (default for LLM-derived patterns) is held to
-        // ai_inferred_pattern (min_evidence=2, τ=0.85) and cannot consolidate from
-        // a single event; an `explicit` user statement keeps the explicit bar.
-        // RuleBasedProvider always emits explicit, so Mode A is unchanged.
-        created_by: cand.mode === 'inferred' ? 'ai' : 'rule',
+        // Only the trusted deterministic extractor can claim rule authority.
+        // Model output is proposal-only metadata, even when it says
+        // mode=explicit; the validator must hold it to the AI/inferred bar.
+        created_by: provider.id === 'rule_based' && cand.mode === 'explicit' ? 'rule' : 'ai',
         created_by_derivation_id: derivation.derivation_id,
         created_at: now.toISOString(),
         last_recalled_at: null,

@@ -89,6 +89,23 @@ describe('passwordless default mode', () => {
       ctx.close(false);
     }
   });
+
+  it('refuses an ambiguous crash state where both key files exist', async () => {
+    const { root } = setupRealm('local');
+    const layout = replicaLayout(root);
+    const km = createKeyMaterial(PASS);
+    atomicWriteFile(layout.keyBundle, JSON.stringify(km.bundle), 0o600);
+    let prompted = false;
+
+    await expect(
+      openActiveRealm(root, async () => {
+        prompted = true;
+        return PASS;
+      }),
+    ).rejects.toThrow(/Ambiguous Memoring key mode/);
+    expect(prompted).toBe(false);
+    expect(() => openRealmLocal(root)).toThrow(/Ambiguous Memoring key mode/);
+  });
 });
 
 describe('opt-in passphrase mode', () => {

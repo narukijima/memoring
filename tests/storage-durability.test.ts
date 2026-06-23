@@ -86,4 +86,58 @@ describe('encrypted DB durability', () => {
       realm.cleanup();
     }
   });
+
+  it('rejects escaped object refs in object store APIs', () => {
+    const realm = makeTempRealm();
+    try {
+      const bad = 'objects/../keys/key.json';
+      expect(() => realm.ctx.objects.exists(bad)).toThrow(/Invalid object ref/);
+      expect(() => realm.ctx.objects.get(bad)).toThrow(/Invalid object ref/);
+      expect(() => realm.ctx.objects.delete(bad)).toThrow(/Invalid object ref/);
+    } finally {
+      realm.cleanup();
+    }
+  });
+
+  it('refuses to reopen a persisted DB document containing an escaped object ref', () => {
+    const realm = makeTempRealm();
+    const root = realm.root;
+    try {
+      const ctx = realm.ctx;
+      const src = sourceIdentity(ctx.realmKey, 'test', 'src-bad-ref');
+      const ses = sessionIdentity(ctx.realmKey, src, 'ses-bad-ref');
+      const eventId = newId('event');
+      const event: MemEvent = {
+        event_id: eventId,
+        event_identity: eventIdentity(ctx.realmKey, src, ses, eventId, 'bad ref'),
+        realm_id: ctx.realmId,
+        occurrence_ids: [newId('occurrence')],
+        session_id: 'ses_bad_ref',
+        turn_id: null,
+        event_type: 'message',
+        role: 'user',
+        origin: 'user',
+        created_at: new Date().toISOString(),
+        source_timestamp: null,
+        timestamp_confidence: 'capture_observed',
+        sequence: 1,
+        text_ref: 'objects/../keys/key.json',
+        source_extra_ref: null,
+        sensitivity: 'internal',
+        sensitivity_classification_state: 'inferred',
+        context_injected: false,
+        context_pack_digest: null,
+        parser_version: 'test.v1',
+        status: 'active',
+        schema_version: SCHEMA_VERSION.event,
+      };
+      ctx.store.putEvent(event);
+      ctx.flush();
+      ctx.close(true);
+
+      expect(() => openRealmLocal(root)).toThrow(/Invalid object ref/);
+    } finally {
+      realm.cleanup();
+    }
+  });
 });

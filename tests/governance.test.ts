@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
 import { cmdClaim } from '../apps/cli/commands/claim';
@@ -253,6 +253,39 @@ describe('claim correction safety', () => {
     const result = buildContext(reopened, { cwd: seeded.projectRoot, outPath: path.join('.memoring', 'context.md') });
     expect(result.kind).toBe('written');
     expect(fs.readFileSync(path.join(seeded.projectRoot, '.memoring', 'context.md'), 'utf8')).not.toContain(secret);
+  });
+
+  it('does not print a secret corrected claim statement in claim list stdout', async () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    const secret = `sk-list-${'B'.repeat(48)}`;
+    const prevHome = process.env.MEMORING_HOME;
+    const prevPass = process.env.MEMORING_PASSPHRASE;
+    const logs: string[] = [];
+
+    ctx.flush();
+    ctx.close(true);
+    process.env.MEMORING_HOME = seeded.realm.root;
+    process.env.MEMORING_PASSPHRASE = 'test-passphrase-1234';
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+    try {
+      await expect(cmdClaim(['correct', decision.claim_id, 'token', secret])).resolves.toBe(0);
+      logs.length = 0;
+      await expect(cmdClaim(['list'])).resolves.toBe(0);
+    } finally {
+      logSpy.mockRestore();
+      if (prevHome === undefined) delete process.env.MEMORING_HOME;
+      else process.env.MEMORING_HOME = prevHome;
+      if (prevPass === undefined) delete process.env.MEMORING_PASSPHRASE;
+      else process.env.MEMORING_PASSPHRASE = prevPass;
+    }
+
+    const out = logs.join('\n');
+    expect(out).toContain('[suppressed:secret]');
+    expect(out).not.toContain(secret);
+    seeded.realm.ctx = openRealmLocal(seeded.realm.root);
   });
 });
 

@@ -34,14 +34,15 @@ function evidenceEvents(ctx: RealmContext, claim: Claim): MemEvent[] {
   return out;
 }
 
-/** independent evidence: events with an external-observation origin that are not
- * a context_injected assistant paraphrase (the latter never has an independent
- * origin anyway; checked for defense in depth). */
+/** independent evidence: events with an external-observation origin that did
+ * not come from a session seeded by Memoring's own ContextPack. v0 has no
+ * per-span proof that a marker-bearing user message is a new correction rather
+ * than pasted context, so context_injected evidence fails closed. */
 function independentEvidence(events: MemEvent[]): MemEvent[] {
   return events.filter((e) => {
     if (e.status !== 'active') return false;
     if (!isIndependentEvidenceOrigin(e.origin)) return false;
-    if (e.context_injected && e.origin === 'assistant') return false;
+    if (e.context_injected) return false;
     return true;
   });
 }
@@ -59,6 +60,9 @@ export function validateClaim(ctx: RealmContext, claim: Claim, statement: string
   const origins = new Set<Origin>(events.map((e) => e.origin));
 
   if (events.length === 0) return { decision: 'rejected', reasons: ['evidence:none'] };
+  if (events.some((e) => e.context_injected)) {
+    return { decision: 'rejected', reasons: ['provenance:self_generated_context'] };
+  }
   if (REQUIRE_USER_ORIGIN.has(claim.kind) && !origins.has('user')) {
     return { decision: 'rejected', reasons: [`evidence:${claim.kind}_requires_user_origin`] };
   }
