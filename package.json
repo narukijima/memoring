@@ -21,6 +21,7 @@
   "scripts": {
     "memoring": "tsx apps/cli/main.ts",
     "daemon": "tsx apps/daemon/main.ts",
+    "serve": "tsx apps/server/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
