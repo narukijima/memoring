@@ -16,28 +16,38 @@ const HTML = `<!doctype html>
     :root {
       color-scheme: light;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: #1f2933;
-      background: #f7f8fa;
+      color: #17202a;
+      background: #f5f7fa;
     }
     body {
       margin: 0;
-      padding: 32px;
+      padding: 28px 32px 40px;
     }
     main {
-      max-width: 1120px;
+      max-width: 1180px;
       margin: 0 auto;
     }
-    header {
+    .app-header {
       display: flex;
-      align-items: end;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 24px;
-      margin-bottom: 24px;
+      margin-bottom: 22px;
     }
     h1 {
       margin: 0;
-      font-size: 24px;
-      font-weight: 650;
+      font-size: 26px;
+      font-weight: 700;
+    }
+    .subtitle {
+      margin-top: 7px;
+      color: #5f6f82;
+      font-size: 14px;
+    }
+    .control-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
     }
     label {
       display: grid;
@@ -56,78 +66,257 @@ const HTML = `<!doctype html>
       padding: 0 10px;
       font: inherit;
     }
-    section {
-      margin-top: 24px;
-    }
-    h2 {
-      margin: 28px 0 10px;
-      font-size: 15px;
-      font-weight: 650;
-      color: #323f4b;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: #fff;
-      border: 1px solid #d9e2ec;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    th,
-    td {
-      border-bottom: 1px solid #e4e7eb;
-      padding: 10px 12px;
-      text-align: left;
-      vertical-align: top;
-      font-size: 14px;
-      line-height: 1.45;
-    }
-    th {
-      width: 128px;
-      background: #f0f4f8;
-      color: #52606d;
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border-radius: 999px;
+      padding: 0 10px;
+      background: #e6f4ef;
+      color: #1f6f50;
       font-size: 12px;
-      text-transform: uppercase;
       font-weight: 700;
     }
-    tr:last-child td,
-    tr:last-child th {
-      border-bottom: 0;
+    .overview {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0 24px;
+    }
+    .metric {
+      min-height: 96px;
+      border: 1px solid #d8e0ea;
+      border-radius: 8px;
+      background: #fff;
+      padding: 16px;
+    }
+    .metric-label {
+      color: #66788a;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .metric-value {
+      margin-top: 8px;
+      font-size: 28px;
+      font-weight: 750;
+    }
+    .metric-note {
+      margin-top: 6px;
+      color: #627387;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .workspace {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+    .panel,
+    .memory-column {
+      min-width: 0;
+    }
+    .panel {
+      position: sticky;
+      top: 24px;
+      border: 1px solid #d8e0ea;
+      border-radius: 8px;
+      background: #fff;
+      padding: 16px;
+    }
+    .section-title {
+      margin: 0 0 12px;
+      color: #344356;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .kind-row {
+      display: grid;
+      gap: 6px;
+      margin-top: 14px;
+    }
+    .kind-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: #405166;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .bar-track {
+      height: 8px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #edf1f5;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: #2f7e77;
     }
     .status {
-      color: #627d98;
+      color: #627387;
       font-size: 14px;
     }
+    .group {
+      margin-bottom: 22px;
+    }
+    .group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 10px;
+    }
+    .group-title {
+      margin: 0;
+      color: #253243;
+      font-size: 16px;
+      font-weight: 750;
+    }
+    .count {
+      color: #323f4b;
+      font-size: 12px;
+      font-weight: 700;
+      background: #eef2f6;
+      border-radius: 999px;
+      padding: 4px 9px;
+    }
+    .memory-card {
+      display: grid;
+      grid-template-columns: 5px minmax(0, 1fr);
+      border: 1px solid #d8e0ea;
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .memory-rail {
+      background: #2f7e77;
+    }
+    .memory-body {
+      padding: 14px 16px;
+    }
+    .memory-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .sensitivity {
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .sensitivity.internal {
+      background: #e7eef8;
+      color: #315f99;
+    }
+    .sensitivity.public {
+      background: #e6f4ef;
+      color: #1f6f50;
+    }
+    .claim-id {
+      color: #7b8794;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    .statement {
+      color: #17202a;
+      font-size: 15px;
+      line-height: 1.5;
+    }
     .empty {
-      padding: 18px 0;
+      border: 1px dashed #cbd5df;
+      border-radius: 8px;
+      padding: 24px;
+      color: #627387;
+      font-size: 14px;
+      background: #fff;
+    }
+    .kind-constraint .memory-rail,
+    .kind-constraint .bar-fill {
+      background: #8a5cf6;
+    }
+    .kind-preference .memory-rail,
+    .kind-preference .bar-fill {
+      background: #2f7e77;
+    }
+    .kind-decision .memory-rail,
+    .kind-decision .bar-fill {
+      background: #c26a2e;
+    }
+    .kind-fact .memory-rail,
+    .kind-fact .bar-fill,
+    .kind-project_context .memory-rail,
+    .kind-project_context .bar-fill {
+      background: #3f7db8;
+    }
+    .kind-procedure .memory-rail,
+    .kind-procedure .bar-fill {
+      background: #65758b;
     }
   </style>
 </head>
 <body>
   <main>
-    <header>
-      <h1>Memoring</h1>
-      <label>
-        Scope
-        <select id="scopeSelect" disabled>
-          <option>Loading scopes...</option>
-        </select>
-      </label>
+    <header class="app-header">
+      <div>
+        <h1>Memoring</h1>
+        <div class="subtitle">Local owner view for scoped memories.</div>
+      </div>
+      <div class="control-row">
+        <span class="pill">Read-only</span>
+        <label>
+          Scope
+          <select id="scopeSelect" disabled>
+            <option>Loading scopes...</option>
+          </select>
+        </label>
+      </div>
     </header>
-    <div id="status" class="status"></div>
-    <section id="memoryGroups"></section>
+    <section id="overview" class="overview"></section>
+    <div class="workspace">
+      <aside class="panel">
+        <h2 class="section-title">Kind mix</h2>
+        <div id="kindChart"></div>
+      </aside>
+      <section class="memory-column">
+        <div class="group-header">
+          <h2 class="section-title">Memories</h2>
+          <div id="status" class="status"></div>
+        </div>
+        <div id="memoryGroups"></div>
+      </section>
+    </div>
   </main>
   <script>
     const select = document.querySelector('#scopeSelect');
+    const overviewEl = document.querySelector('#overview');
+    const chartEl = document.querySelector('#kindChart');
     const statusEl = document.querySelector('#status');
     const groupsEl = document.querySelector('#memoryGroups');
     let scopes = [];
+    const kindOrder = ['constraint', 'preference', 'decision', 'fact', 'project_context', 'procedure'];
+    const kindLabels = {
+      constraint: 'Constraints',
+      preference: 'Preferences',
+      decision: 'Decisions',
+      fact: 'Facts',
+      project_context: 'Project context',
+      procedure: 'Procedures'
+    };
 
     function setStatus(message) {
       statusEl.textContent = message || '';
     }
 
-    function clearGroups() {
+    function clearSurface() {
+      overviewEl.replaceChildren();
+      chartEl.replaceChildren();
       groupsEl.replaceChildren();
     }
 
@@ -137,6 +326,10 @@ const HTML = `<!doctype html>
       el.textContent = text;
       parent.appendChild(el);
       return el;
+    }
+
+    function kindClass(kind) {
+      return 'kind-' + String(kind).replace(/[^a-z0-9_]/g, '_');
     }
 
     function groupByKind(rows) {
@@ -149,36 +342,103 @@ const HTML = `<!doctype html>
       return grouped;
     }
 
-    function renderRows(rows) {
-      clearGroups();
-      if (rows.length === 0) {
-        addText(groupsEl, 'div', 'No memories in this scope.', 'status empty');
+    function sortedGroups(rows) {
+      const grouped = groupByKind(rows);
+      return Array.from(grouped.entries()).sort(([left], [right]) => {
+        const l = kindOrder.indexOf(left);
+        const r = kindOrder.indexOf(right);
+        return (l < 0 ? 99 : l) - (r < 0 ? 99 : r) || left.localeCompare(right);
+      });
+    }
+
+    function metric(label, value, note) {
+      const item = document.createElement('div');
+      item.className = 'metric';
+      addText(item, 'div', label, 'metric-label');
+      addText(item, 'div', value, 'metric-value');
+      addText(item, 'div', note, 'metric-note');
+      overviewEl.appendChild(item);
+    }
+
+    function renderOverview(rows, selected) {
+      overviewEl.replaceChildren();
+      const kinds = new Set(rows.map((row) => row.kind));
+      metric('Visible memories', String(rows.length), 'After active scope and Gate');
+      metric('Scope', selected ? selected.name : '-', selected ? selected.project_id : 'No active scope');
+      metric('Sensitivity', 'Standard', 'Public and internal only');
+      metric('Kinds', String(kinds.size), 'Grouped below');
+    }
+
+    function renderChart(groups, total) {
+      chartEl.replaceChildren();
+      if (total === 0) {
+        addText(chartEl, 'div', 'No visible memory kinds.', 'status');
         return;
       }
 
-      for (const [kind, bucket] of groupByKind(rows)) {
-        addText(groupsEl, 'h2', kind);
-        const table = document.createElement('table');
-        const tbody = document.createElement('tbody');
+      for (const [kind, bucket] of groups) {
+        const row = document.createElement('div');
+        row.className = 'kind-row ' + kindClass(kind);
+        const meta = document.createElement('div');
+        meta.className = 'kind-meta';
+        addText(meta, 'span', kindLabels[kind] || kind);
+        addText(meta, 'span', String(bucket.length));
+        const track = document.createElement('div');
+        track.className = 'bar-track';
+        const fill = document.createElement('div');
+        fill.className = 'bar-fill';
+        fill.style.width = Math.max(6, Math.round((bucket.length / total) * 100)) + '%';
+        track.appendChild(fill);
+        row.append(meta, track);
+        chartEl.appendChild(row);
+      }
+    }
+
+    function renderRows(rows, selected) {
+      const groups = sortedGroups(rows);
+      renderOverview(rows, selected);
+      renderChart(groups, rows.length);
+      groupsEl.replaceChildren();
+
+      if (rows.length === 0) {
+        addText(groupsEl, 'div', 'No memories in this scope.', 'empty');
+        return;
+      }
+
+      for (const [kind, bucket] of groups) {
+        const group = document.createElement('section');
+        group.className = 'group ' + kindClass(kind);
+        const header = document.createElement('div');
+        header.className = 'group-header';
+        addText(header, 'h3', kindLabels[kind] || kind, 'group-title');
+        addText(header, 'span', bucket.length + ' visible', 'count');
+        group.appendChild(header);
+
         for (const row of bucket) {
-          const tr = document.createElement('tr');
-          const sensitivity = document.createElement('th');
-          sensitivity.scope = 'row';
-          sensitivity.textContent = row.sensitivity;
-          const statement = document.createElement('td');
-          statement.textContent = row.statement;
-          tr.append(sensitivity, statement);
-          tbody.appendChild(tr);
+          const card = document.createElement('article');
+          card.className = 'memory-card ' + kindClass(row.kind);
+          const rail = document.createElement('div');
+          rail.className = 'memory-rail';
+          const body = document.createElement('div');
+          body.className = 'memory-body';
+          const meta = document.createElement('div');
+          meta.className = 'memory-meta';
+          const sensitivity = addText(meta, 'span', row.sensitivity, 'sensitivity ' + row.sensitivity);
+          const id = addText(meta, 'span', row.claim_id, 'claim-id');
+          const statement = addText(body, 'div', row.statement, 'statement');
+          body.prepend(meta);
+          card.append(rail, body);
+          group.appendChild(card);
         }
-        table.appendChild(tbody);
-        groupsEl.appendChild(table);
+
+        groupsEl.appendChild(group);
       }
     }
 
     async function loadMemories() {
       const selected = scopes.find((scope) => scope.project_id === select.value);
       if (!selected) {
-        clearGroups();
+        clearSurface();
         setStatus('Select a scope.');
         return;
       }
@@ -188,8 +448,8 @@ const HTML = `<!doctype html>
       const response = await fetch('/api/memories?' + params.toString());
       if (!response.ok) throw new Error('Failed to load memories');
       const rows = await response.json();
-      renderRows(rows);
-      setStatus(rows.length + ' visible memories');
+      renderRows(rows, selected);
+      setStatus(rows.length + ' visible');
     }
 
     async function loadScopes() {
@@ -202,6 +462,7 @@ const HTML = `<!doctype html>
         option.textContent = 'No scopes';
         select.appendChild(option);
         select.disabled = true;
+        clearSurface();
         setStatus('No configured scopes.');
         return;
       }
@@ -218,13 +479,13 @@ const HTML = `<!doctype html>
 
     select.addEventListener('change', () => {
       loadMemories().catch((error) => {
-        clearGroups();
+        clearSurface();
         setStatus(error.message);
       });
     });
 
     loadScopes().catch((error) => {
-      clearGroups();
+      clearSurface();
       select.replaceChildren();
       select.disabled = true;
       setStatus(error.message);
@@ -280,6 +541,12 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
   try {
     if (url.pathname === '/') {
       sendHtml(res);
+      return;
+    }
+
+    if (url.pathname === '/favicon.ico') {
+      res.writeHead(204, { 'cache-control': 'no-store' });
+      res.end();
       return;
     }
 
