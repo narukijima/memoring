@@ -77,52 +77,24 @@ const HTML = `<!doctype html>
       font-size: 12px;
       font-weight: 700;
     }
-    .overview {
+    .ring-dashboard {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin: 18px 0 24px;
-    }
-    .metric {
-      min-height: 96px;
-      border: 1px solid #d8e0ea;
-      border-radius: 8px;
-      background: #fff;
-      padding: 16px;
-    }
-    .metric-label {
-      color: #66788a;
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-    .metric-value {
-      margin-top: 8px;
-      font-size: 28px;
-      font-weight: 750;
-    }
-    .metric-note {
-      margin-top: 6px;
-      color: #627387;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .workspace {
-      display: grid;
-      grid-template-columns: 280px minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr) 340px;
       gap: 20px;
       align-items: start;
+      margin: 18px 0 26px;
     }
-    .panel,
-    .memory-column {
-      min-width: 0;
-    }
+    .ring-panel,
     .panel {
-      position: sticky;
-      top: 24px;
       border: 1px solid #d8e0ea;
       border-radius: 8px;
       background: #fff;
+      min-width: 0;
+    }
+    .ring-panel {
+      padding: 18px 18px 22px;
+    }
+    .panel {
       padding: 16px;
     }
     .section-title {
@@ -130,6 +102,126 @@ const HTML = `<!doctype html>
       color: #344356;
       font-size: 14px;
       font-weight: 700;
+    }
+    .ring-stage {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      color: #627387;
+      font-size: 13px;
+      line-height: 1.45;
+      margin-bottom: 12px;
+    }
+    .ring-stage strong {
+      display: block;
+      color: #17202a;
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+    .ring-viz {
+      position: relative;
+      min-height: 430px;
+    }
+    .ring-circle {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 344px;
+      height: 344px;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: inset 0 0 0 1px #d8e0ea, 0 18px 60px rgba(23, 32, 42, 0.08);
+    }
+    .ring-core {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 180px;
+      min-height: 130px;
+      transform: translate(-50%, -50%);
+      border: 1px solid #d8e0ea;
+      border-radius: 50%;
+      background: #fff;
+      display: grid;
+      align-content: center;
+      justify-items: center;
+      text-align: center;
+      padding: 18px;
+      box-shadow: 0 12px 30px rgba(23, 32, 42, 0.08);
+    }
+    .core-label {
+      color: #66788a;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .core-value {
+      margin-top: 6px;
+      color: #17202a;
+      font-size: 24px;
+      font-weight: 800;
+      max-width: 150px;
+      overflow-wrap: anywhere;
+    }
+    .core-note {
+      margin-top: 6px;
+      color: #627387;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .ring-node {
+      position: absolute;
+      width: 132px;
+      transform: translate(-50%, -50%);
+      border: 1px solid #d8e0ea;
+      border-radius: 8px;
+      background: #fff;
+      padding: 9px 10px;
+      box-shadow: 0 10px 24px rgba(23, 32, 42, 0.08);
+    }
+    .node-label {
+      color: #405166;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .node-count {
+      margin-top: 3px;
+      color: #17202a;
+      font-size: 20px;
+      font-weight: 800;
+    }
+    .loop-step {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid #edf1f5;
+    }
+    .loop-step:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+    }
+    .step-index {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #eef2f6;
+      color: #405166;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .step-title {
+      color: #253243;
+      font-size: 13px;
+      font-weight: 750;
+    }
+    .step-copy {
+      margin-top: 3px;
+      color: #627387;
+      font-size: 12px;
+      line-height: 1.35;
     }
     .kind-row {
       display: grid;
@@ -158,6 +250,9 @@ const HTML = `<!doctype html>
     .status {
       color: #627387;
       font-size: 14px;
+    }
+    .memory-column {
+      min-width: 0;
     }
     .group {
       margin-bottom: 22px;
@@ -278,26 +373,39 @@ const HTML = `<!doctype html>
         </label>
       </div>
     </header>
-    <section id="overview" class="overview"></section>
-    <div class="workspace">
+    <section class="ring-dashboard">
+      <div class="ring-panel">
+        <div class="ring-stage">
+          <div>
+            <strong>Memory Ring</strong>
+            Scoped memories orbit the active project and pass the local-view Gate before display.
+          </div>
+          <div id="status" class="status"></div>
+        </div>
+        <div id="memoryRing" class="ring-viz"></div>
+      </div>
       <aside class="panel">
+        <h2 class="section-title">Loop map</h2>
+        <div id="loopSteps"></div>
         <h2 class="section-title">Kind mix</h2>
         <div id="kindChart"></div>
       </aside>
-      <section class="memory-column">
-        <div class="group-header">
-          <h2 class="section-title">Memories</h2>
-          <div id="status" class="status"></div>
-        </div>
-        <div id="memoryGroups"></div>
-      </section>
-    </div>
+    </section>
+    <section class="memory-column">
+      <div class="group-header">
+        <h2 class="section-title">Gated memories</h2>
+        <div id="memoryCount" class="status"></div>
+      </div>
+      <div id="memoryGroups"></div>
+    </section>
   </main>
   <script>
     const select = document.querySelector('#scopeSelect');
-    const overviewEl = document.querySelector('#overview');
+    const ringEl = document.querySelector('#memoryRing');
+    const loopStepsEl = document.querySelector('#loopSteps');
     const chartEl = document.querySelector('#kindChart');
     const statusEl = document.querySelector('#status');
+    const memoryCountEl = document.querySelector('#memoryCount');
     const groupsEl = document.querySelector('#memoryGroups');
     let scopes = [];
     const kindOrder = ['constraint', 'preference', 'decision', 'fact', 'project_context', 'procedure'];
@@ -309,14 +417,24 @@ const HTML = `<!doctype html>
       project_context: 'Project context',
       procedure: 'Procedures'
     };
+    const kindColors = {
+      constraint: '#8a5cf6',
+      preference: '#2f7e77',
+      decision: '#c26a2e',
+      fact: '#3f7db8',
+      project_context: '#3f7db8',
+      procedure: '#65758b'
+    };
 
     function setStatus(message) {
       statusEl.textContent = message || '';
     }
 
     function clearSurface() {
-      overviewEl.replaceChildren();
+      ringEl.replaceChildren();
+      loopStepsEl.replaceChildren();
       chartEl.replaceChildren();
+      memoryCountEl.textContent = '';
       groupsEl.replaceChildren();
     }
 
@@ -351,22 +469,68 @@ const HTML = `<!doctype html>
       });
     }
 
-    function metric(label, value, note) {
-      const item = document.createElement('div');
-      item.className = 'metric';
-      addText(item, 'div', label, 'metric-label');
-      addText(item, 'div', value, 'metric-value');
-      addText(item, 'div', note, 'metric-note');
-      overviewEl.appendChild(item);
+    function conicForGroups(groups, total) {
+      if (total === 0) return 'radial-gradient(circle at center, #fff 0 43%, transparent 44%), #edf1f5';
+      let cursor = 0;
+      const segments = [];
+      for (const [kind, bucket] of groups) {
+        const end = cursor + (bucket.length / total) * 360;
+        const color = kindColors[kind] || '#65758b';
+        segments.push(color + ' ' + cursor.toFixed(2) + 'deg ' + end.toFixed(2) + 'deg');
+        cursor = end;
+      }
+      return 'radial-gradient(circle at center, #fff 0 43%, transparent 44%), conic-gradient(' + segments.join(', ') + ')';
     }
 
-    function renderOverview(rows, selected) {
-      overviewEl.replaceChildren();
-      const kinds = new Set(rows.map((row) => row.kind));
-      metric('Visible memories', String(rows.length), 'After active scope and Gate');
-      metric('Scope', selected ? selected.name : '-', selected ? selected.project_id : 'No active scope');
-      metric('Sensitivity', 'Standard', 'Public and internal only');
-      metric('Kinds', String(kinds.size), 'Grouped below');
+    function renderRing(groups, rows, selected) {
+      ringEl.replaceChildren();
+      const circle = document.createElement('div');
+      circle.className = 'ring-circle';
+      circle.style.background = conicForGroups(groups, rows.length);
+
+      const core = document.createElement('div');
+      core.className = 'ring-core';
+      addText(core, 'div', 'Active scope', 'core-label');
+      addText(core, 'div', selected ? selected.name : '-', 'core-value');
+      addText(core, 'div', rows.length + ' gated memories / standard local view', 'core-note');
+
+      ringEl.append(circle, core);
+      if (groups.length === 0) return;
+
+      const radius = 43;
+      groups.forEach(([kind, bucket], index) => {
+        const angle = -90 + (360 / groups.length) * index;
+        const rad = (angle * Math.PI) / 180;
+        const node = document.createElement('div');
+        node.className = 'ring-node ' + kindClass(kind);
+        node.style.left = 50 + radius * Math.cos(rad) + '%';
+        node.style.top = 50 + radius * Math.sin(rad) + '%';
+        node.style.borderTop = '4px solid ' + (kindColors[kind] || '#65758b');
+        addText(node, 'div', kindLabels[kind] || kind, 'node-label');
+        addText(node, 'div', String(bucket.length), 'node-count');
+        ringEl.appendChild(node);
+      });
+    }
+
+    function renderLoopSteps(rows, selected) {
+      loopStepsEl.replaceChildren();
+      const steps = [
+        ['Project scope', selected ? selected.name : 'No scope selected'],
+        ['Memory forms', rows.length + ' visible claims grouped by kind'],
+        ['Output Gate', 'human_local_view / standard'],
+        ['Local view', 'Read-only browser surface'],
+        ['Reuse', 'Context can return to the next AI session']
+      ];
+      steps.forEach(([title, copy], index) => {
+        const row = document.createElement('div');
+        row.className = 'loop-step';
+        addText(row, 'div', String(index + 1), 'step-index');
+        const body = document.createElement('div');
+        addText(body, 'div', title, 'step-title');
+        addText(body, 'div', copy, 'step-copy');
+        row.appendChild(body);
+        loopStepsEl.appendChild(row);
+      });
     }
 
     function renderChart(groups, total) {
@@ -396,9 +560,11 @@ const HTML = `<!doctype html>
 
     function renderRows(rows, selected) {
       const groups = sortedGroups(rows);
-      renderOverview(rows, selected);
+      renderRing(groups, rows, selected);
+      renderLoopSteps(rows, selected);
       renderChart(groups, rows.length);
       groupsEl.replaceChildren();
+      memoryCountEl.textContent = rows.length + ' visible';
 
       if (rows.length === 0) {
         addText(groupsEl, 'div', 'No memories in this scope.', 'empty');
@@ -423,9 +589,9 @@ const HTML = `<!doctype html>
           body.className = 'memory-body';
           const meta = document.createElement('div');
           meta.className = 'memory-meta';
-          const sensitivity = addText(meta, 'span', row.sensitivity, 'sensitivity ' + row.sensitivity);
-          const id = addText(meta, 'span', row.claim_id, 'claim-id');
-          const statement = addText(body, 'div', row.statement, 'statement');
+          addText(meta, 'span', row.sensitivity, 'sensitivity ' + row.sensitivity);
+          addText(meta, 'span', row.claim_id, 'claim-id');
+          addText(body, 'div', row.statement, 'statement');
           body.prepend(meta);
           card.append(rail, body);
           group.appendChild(card);
