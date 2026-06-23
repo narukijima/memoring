@@ -15,11 +15,24 @@ function traversableEndpoint(ctx: RealmContext, claim: Claim): boolean {
   return !isClaimSuppressed(ctx, claim, readClaimStatement(ctx, claim));
 }
 
-function linkedClaimIds(ctx: RealmContext, claim: Claim): string[] {
-  const ids = new Set<string>(claim.supersedes);
+/** Reverse supersede index: predecessor claim_id -> ids of claims that supersede it.
+ *  Built once per proposeNeighbors call so successor lookup is O(1) per seed instead
+ *  of a full claim scan per seed (O(seeds x claims) on every context build). */
+function buildSuccessorIndex(ctx: RealmContext): Map<string, string[]> {
+  const successors = new Map<string, string[]>();
   for (const candidate of ctx.store.listClaims(ctx.realmId)) {
-    if (candidate.supersedes.includes(claim.claim_id)) ids.add(candidate.claim_id);
+    for (const predecessorId of candidate.supersedes) {
+      const arr = successors.get(predecessorId);
+      if (arr) arr.push(candidate.claim_id);
+      else successors.set(predecessorId, [candidate.claim_id]);
+    }
   }
+  return successors;
+}
+
+function linkedClaimIds(claim: Claim, successors: Map<string, string[]>): string[] {
+  const ids = new Set<string>(claim.supersedes);
+  for (const successorId of successors.get(claim.claim_id) ?? []) ids.add(successorId);
   ids.delete(claim.claim_id);
   return [...ids];
 }
@@ -29,12 +42,14 @@ export function proposeNeighbors(ctx: RealmContext, seedClaims: ScopedClaim[], r
   const proposedIds = new Set<string>();
   const proposed: ScopedClaim[] = [];
   const neighborReq: GateRequest = { ...req, crossScopeAllowed: false };
+  if (seedClaims.length === 0) return proposed;
+  const successors = buildSuccessorIndex(ctx);
 
   for (const seed of seedClaims) {
     const from = ctx.store.getClaim(seed.claim.claim_id);
     if (!from || !traversableEndpoint(ctx, from)) continue;
 
-    for (const neighborId of linkedClaimIds(ctx, from)) {
+    for (const neighborId of linkedClaimIds(from, successors)) {
       if (seedIds.has(neighborId) || proposedIds.has(neighborId)) continue;
       const neighbor = ctx.store.getClaim(neighborId);
       if (!neighbor || !traversableEndpoint(ctx, neighbor)) continue;
