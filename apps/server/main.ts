@@ -15,399 +15,464 @@ const HTML = `<!doctype html>
   <style>
     :root {
       color-scheme: light;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: #17202a;
-      background: #f5f7fa;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #f6f7f5;
+      --panel: #ffffff;
+      --ink: #1d2421;
+      --muted: #69736f;
+      --quiet: #9aa39f;
+      --line: #dde3df;
+      --line-strong: #c8d2cd;
+      --green: #2d7267;
+      --green-soft: #e5f0ec;
+      --violet: #7661a8;
+      --amber: #b2763a;
+      --blue: #50749e;
+      --slate: #68737f;
+    }
+    * {
+      box-sizing: border-box;
     }
     body {
       margin: 0;
-      padding: 28px 32px 40px;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
     }
     main {
-      max-width: 1180px;
+      max-width: 1120px;
       margin: 0 auto;
+      padding: 28px 28px 40px;
     }
-    .app-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 24px;
+      align-items: end;
       margin-bottom: 22px;
     }
+    .eyebrow {
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 780;
+      letter-spacing: 0;
+    }
     h1 {
-      margin: 0;
-      font-size: 26px;
-      font-weight: 700;
+      margin: 5px 0 0;
+      font-size: 34px;
+      line-height: 1.05;
+      font-weight: 820;
+      letter-spacing: 0;
     }
-    .subtitle {
-      margin-top: 7px;
-      color: #5f6f82;
+    .subline {
+      margin-top: 9px;
+      color: var(--muted);
       font-size: 14px;
-    }
-    .control-row {
-      display: flex;
-      align-items: flex-end;
-      gap: 12px;
+      line-height: 1.45;
     }
     label {
       display: grid;
-      gap: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      color: #52606d;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
     }
     select {
-      min-width: 280px;
-      height: 36px;
-      border: 1px solid #cbd2d9;
-      border-radius: 6px;
-      background: #fff;
-      color: #1f2933;
-      padding: 0 10px;
-      font: inherit;
-    }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      min-height: 28px;
+      min-width: 260px;
+      height: 38px;
+      border: 1px solid var(--line-strong);
       border-radius: 999px;
-      padding: 0 10px;
-      background: #e6f4ef;
-      color: #1f6f50;
-      font-size: 12px;
-      font-weight: 700;
-    }
-    .ring-dashboard {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 340px;
-      gap: 20px;
-      align-items: start;
-      margin: 18px 0 26px;
-    }
-    .ring-panel,
-    .panel {
-      border: 1px solid #d8e0ea;
-      border-radius: 8px;
-      background: #fff;
-      min-width: 0;
-    }
-    .ring-panel {
-      padding: 18px 18px 22px;
-    }
-    .panel {
-      padding: 16px;
-    }
-    .section-title {
-      margin: 0 0 12px;
-      color: #344356;
+      background: var(--panel);
+      color: var(--ink);
+      padding: 0 14px;
+      font: inherit;
       font-size: 14px;
-      font-weight: 700;
     }
-    .ring-stage {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      color: #627387;
-      font-size: 13px;
-      line-height: 1.45;
-      margin-bottom: 12px;
+    select:focus {
+      outline: 2px solid rgba(45, 114, 103, 0.22);
+      outline-offset: 2px;
     }
-    .ring-stage strong {
-      display: block;
-      color: #17202a;
-      font-size: 18px;
-      margin-bottom: 4px;
+    .surface {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.74);
+      padding: 24px;
     }
-    .ring-viz {
+    .ring-row {
+      display: grid;
+      grid-template-columns: minmax(430px, 1fr) 300px;
+      gap: 26px;
+      align-items: center;
+    }
+    .ring-wrap {
       position: relative;
-      min-height: 430px;
+      min-height: 500px;
     }
-    .ring-circle {
+    .ring {
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 344px;
-      height: 344px;
-      border-radius: 50%;
+      z-index: 1;
+      width: 410px;
+      height: 410px;
       transform: translate(-50%, -50%);
-      box-shadow: inset 0 0 0 1px #d8e0ea, 0 18px 60px rgba(23, 32, 42, 0.08);
+      border-radius: 50%;
+      border: 1px solid rgba(45, 114, 103, 0.24);
+      background:
+        radial-gradient(circle, var(--bg) 0 45%, transparent 46%),
+        conic-gradient(from -75deg, rgba(45, 114, 103, 0.92), rgba(80, 116, 158, 0.72), rgba(118, 97, 168, 0.68), rgba(178, 118, 58, 0.72), rgba(45, 114, 103, 0.92));
+      box-shadow: inset 0 0 0 31px rgba(255, 255, 255, 0.82);
     }
-    .ring-core {
+    .ring::before,
+    .ring::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .ring::before {
+      inset: 58px;
+      border: 1px solid rgba(29, 36, 33, 0.10);
+    }
+    .ring::after {
+      inset: -34px;
+      border: 1px solid rgba(200, 210, 205, 0.60);
+    }
+    .core {
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 180px;
-      min-height: 130px;
+      z-index: 2;
+      width: 196px;
+      min-height: 150px;
       transform: translate(-50%, -50%);
-      border: 1px solid #d8e0ea;
+      border: 1px solid var(--line);
       border-radius: 50%;
-      background: #fff;
-      display: grid;
-      align-content: center;
-      justify-items: center;
-      text-align: center;
-      padding: 18px;
-      box-shadow: 0 12px 30px rgba(23, 32, 42, 0.08);
-    }
-    .core-label {
-      color: #66788a;
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-    }
-    .core-value {
-      margin-top: 6px;
-      color: #17202a;
-      font-size: 24px;
-      font-weight: 800;
-      max-width: 150px;
-      overflow-wrap: anywhere;
-    }
-    .core-note {
-      margin-top: 6px;
-      color: #627387;
-      font-size: 12px;
-      line-height: 1.35;
-    }
-    .ring-node {
-      position: absolute;
-      width: 132px;
-      transform: translate(-50%, -50%);
-      border: 1px solid #d8e0ea;
-      border-radius: 8px;
-      background: #fff;
-      padding: 9px 10px;
-      box-shadow: 0 10px 24px rgba(23, 32, 42, 0.08);
-    }
-    .node-label {
-      color: #405166;
-      font-size: 12px;
-      font-weight: 800;
-    }
-    .node-count {
-      margin-top: 3px;
-      color: #17202a;
-      font-size: 20px;
-      font-weight: 800;
-    }
-    .loop-step {
-      display: grid;
-      grid-template-columns: 28px minmax(0, 1fr);
-      gap: 10px;
-      padding: 10px 0;
-      border-top: 1px solid #edf1f5;
-    }
-    .loop-step:first-of-type {
-      border-top: 0;
-      padding-top: 0;
-    }
-    .step-index {
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.95);
       display: grid;
       place-items: center;
-      background: #eef2f6;
-      color: #405166;
-      font-size: 12px;
-      font-weight: 800;
+      text-align: center;
+      padding: 24px;
     }
-    .step-title {
-      color: #253243;
-      font-size: 13px;
-      font-weight: 750;
+    .core-kicker {
+      color: var(--green);
+      font-size: 11px;
+      font-weight: 780;
+      text-transform: uppercase;
+      letter-spacing: 0;
     }
-    .step-copy {
-      margin-top: 3px;
-      color: #627387;
+    .core-name {
+      width: 100%;
+      margin-top: 6px;
+      font-size: 21px;
+      line-height: 1.08;
+      font-weight: 810;
+      overflow-wrap: anywhere;
+    }
+    .core-count {
+      margin-top: 7px;
+      color: var(--muted);
       font-size: 12px;
       line-height: 1.35;
     }
-    .kind-row {
-      display: grid;
-      gap: 6px;
-      margin-top: 14px;
-    }
-    .kind-meta {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      color: #405166;
-      font-size: 13px;
-      font-weight: 650;
-    }
-    .bar-track {
-      height: 8px;
-      overflow: hidden;
+    .gate-mark {
+      position: absolute;
+      right: 5%;
+      top: 50%;
+      z-index: 3;
+      width: 86px;
+      transform: translateY(-50%);
+      border: 1px solid rgba(45, 114, 103, 0.28);
       border-radius: 999px;
-      background: #edf1f5;
+      background: var(--green-soft);
+      color: #285f57;
+      padding: 7px 10px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 760;
     }
-    .bar-fill {
-      height: 100%;
-      border-radius: inherit;
-      background: #2f7e77;
+    .gate-mark::before {
+      content: "";
+      position: absolute;
+      left: -76px;
+      top: 50%;
+      width: 75px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(45, 114, 103, 0.45));
     }
-    .status {
-      color: #627387;
-      font-size: 14px;
+    .seed {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      z-index: 4;
+      width: 10px;
+      height: 10px;
+      transform: translate(-50%, -50%);
+      border: 2px solid var(--panel);
+      border-radius: 50%;
+      background: var(--kind-color, var(--green));
+      box-shadow: 0 0 0 5px rgba(45, 114, 103, 0.08);
     }
-    .memory-column {
-      min-width: 0;
+    .ring-empty {
+      position: absolute;
+      left: 50%;
+      top: 76%;
+      transform: translateX(-50%);
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
     }
-    .group {
-      margin-bottom: 22px;
+    .summary {
+      align-self: stretch;
+      display: grid;
+      align-content: center;
+      gap: 18px;
+      border-left: 1px solid var(--line);
+      padding-left: 26px;
     }
-    .group-header {
+    .stat {
+      display: grid;
+      gap: 4px;
+    }
+    .stat-value {
+      font-size: 32px;
+      line-height: 1;
+      font-weight: 820;
+    }
+    .stat-label {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .chips {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 10px;
+      flex-wrap: wrap;
+      gap: 7px;
     }
-    .group-title {
-      margin: 0;
-      color: #253243;
-      font-size: 16px;
-      font-weight: 750;
-    }
-    .count {
-      color: #323f4b;
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.64);
+      color: #46504c;
+      padding: 5px 9px;
       font-size: 12px;
       font-weight: 700;
-      background: #eef2f6;
-      border-radius: 999px;
-      padding: 4px 9px;
+      white-space: nowrap;
     }
-    .memory-card {
+    .kind-list {
       display: grid;
-      grid-template-columns: 5px minmax(0, 1fr);
-      border: 1px solid #d8e0ea;
-      border-radius: 8px;
-      background: #fff;
+      gap: 9px;
+    }
+    .kind-line {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr) 28px;
+      gap: 9px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .bar {
+      height: 6px;
       overflow: hidden;
-      margin-bottom: 8px;
+      border-radius: 999px;
+      background: #e8ece9;
     }
-    .memory-rail {
-      background: #2f7e77;
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: var(--kind-color, var(--green));
     }
-    .memory-body {
-      padding: 14px 16px;
+    .list-section {
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      overflow: hidden;
     }
-    .memory-meta {
+    .list-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: center;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    h2 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 810;
+      letter-spacing: 0;
+    }
+    .status {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
+    .groups {
+      display: grid;
+      gap: 0;
+    }
+    .group {
+      padding: 16px 18px 18px;
+      border-top: 1px solid var(--line);
+    }
+    .group:first-child {
+      border-top: 0;
+    }
+    .group-title {
       display: flex;
       align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 9px;
+      color: #343d39;
+      font-size: 13px;
+      font-weight: 780;
+    }
+    .group-name {
+      display: inline-flex;
+      align-items: center;
       gap: 8px;
-      margin-bottom: 8px;
+    }
+    .group-name::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--kind-color, var(--green));
+    }
+    .group-count {
+      color: var(--quiet);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .memory {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      gap: 14px;
+      padding: 11px 0;
+      border-top: 1px solid #edf0ee;
+    }
+    .memory:first-of-type {
+      border-top: 0;
     }
     .sensitivity {
+      align-self: start;
+      width: max-content;
+      max-width: 100%;
       border-radius: 999px;
+      background: #edf2ef;
+      color: #365e56;
       padding: 4px 8px;
       font-size: 11px;
-      font-weight: 800;
+      font-weight: 760;
       text-transform: uppercase;
     }
     .sensitivity.internal {
-      background: #e7eef8;
-      color: #315f99;
-    }
-    .sensitivity.public {
-      background: #e6f4ef;
-      color: #1f6f50;
-    }
-    .claim-id {
-      color: #7b8794;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 12px;
+      background: #e9edf3;
+      color: #485f80;
     }
     .statement {
-      color: #17202a;
-      font-size: 15px;
-      line-height: 1.5;
+      min-width: 0;
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.52;
+      overflow-wrap: anywhere;
     }
     .empty {
-      border: 1px dashed #cbd5df;
-      border-radius: 8px;
-      padding: 24px;
-      color: #627387;
+      padding: 18px;
+      color: var(--muted);
       font-size: 14px;
-      background: #fff;
     }
-    .kind-constraint .memory-rail,
-    .kind-constraint .bar-fill {
-      background: #8a5cf6;
-    }
-    .kind-preference .memory-rail,
-    .kind-preference .bar-fill {
-      background: #2f7e77;
-    }
-    .kind-decision .memory-rail,
-    .kind-decision .bar-fill {
-      background: #c26a2e;
-    }
-    .kind-fact .memory-rail,
-    .kind-fact .bar-fill,
-    .kind-project_context .memory-rail,
-    .kind-project_context .bar-fill {
-      background: #3f7db8;
-    }
-    .kind-procedure .memory-rail,
-    .kind-procedure .bar-fill {
-      background: #65758b;
+    .kind-constraint { --kind-color: var(--violet); }
+    .kind-preference { --kind-color: var(--green); }
+    .kind-decision { --kind-color: var(--amber); }
+    .kind-fact,
+    .kind-project_context { --kind-color: var(--blue); }
+    .kind-procedure { --kind-color: var(--slate); }
+    @media (max-width: 900px) {
+      main {
+        padding: 20px;
+      }
+      .topbar,
+      .ring-row,
+      .list-head {
+        grid-template-columns: 1fr;
+      }
+      .summary {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        padding-left: 0;
+        padding-top: 20px;
+      }
+      .ring-wrap {
+        min-height: 460px;
+      }
+      .ring {
+        width: 360px;
+        height: 360px;
+      }
+      .gate-mark {
+        right: 0;
+      }
     }
   </style>
 </head>
 <body>
   <main>
-    <header class="app-header">
+    <header class="topbar">
       <div>
+        <div class="eyebrow">local memory browser</div>
         <h1>Memoring</h1>
-        <div class="subtitle">Local owner view for scoped memories.</div>
+        <div class="subline">Scoped memories orbit the active project. Only rows that pass the local-view Gate are visible.</div>
       </div>
-      <div class="control-row">
-        <span class="pill">Read-only</span>
-        <label>
-          Scope
-          <select id="scopeSelect" disabled>
-            <option>Loading scopes...</option>
-          </select>
-        </label>
-      </div>
+      <label>
+        Scope
+        <select id="scopeSelect" disabled>
+          <option>Loading scopes...</option>
+        </select>
+      </label>
     </header>
-    <section class="ring-dashboard">
-      <div class="ring-panel">
-        <div class="ring-stage">
-          <div>
-            <strong>Memory Ring</strong>
-            Scoped memories orbit the active project and pass the local-view Gate before display.
+
+    <section class="surface" aria-label="Memory ring">
+      <div class="ring-row">
+        <div id="ring" class="ring-wrap"></div>
+        <aside class="summary" aria-label="View summary">
+          <div class="stat">
+            <div id="visibleCount" class="stat-value">0</div>
+            <div id="visibleLabel" class="stat-label">visible memories</div>
           </div>
-          <div id="status" class="status"></div>
-        </div>
-        <div id="memoryRing" class="ring-viz"></div>
+          <div class="chips" aria-label="Safeguards">
+            <span class="chip">127.0.0.1</span>
+            <span class="chip">read-only</span>
+            <span class="chip">standard Gate</span>
+          </div>
+          <div id="kindList" class="kind-list"></div>
+        </aside>
       </div>
-      <aside class="panel">
-        <h2 class="section-title">Loop map</h2>
-        <div id="loopSteps"></div>
-        <h2 class="section-title">Kind mix</h2>
-        <div id="kindChart"></div>
-      </aside>
     </section>
-    <section class="memory-column">
-      <div class="group-header">
-        <h2 class="section-title">Gated memories</h2>
-        <div id="memoryCount" class="status"></div>
+
+    <section class="list-section" aria-label="Gated memories">
+      <div class="list-head">
+        <h2>Gated memories</h2>
+        <div id="status" class="status"></div>
       </div>
-      <div id="memoryGroups"></div>
+      <div id="groups" class="groups"></div>
     </section>
   </main>
   <script>
     const select = document.querySelector('#scopeSelect');
-    const ringEl = document.querySelector('#memoryRing');
-    const loopStepsEl = document.querySelector('#loopSteps');
-    const chartEl = document.querySelector('#kindChart');
+    const ringEl = document.querySelector('#ring');
+    const kindListEl = document.querySelector('#kindList');
+    const groupsEl = document.querySelector('#groups');
     const statusEl = document.querySelector('#status');
-    const memoryCountEl = document.querySelector('#memoryCount');
-    const groupsEl = document.querySelector('#memoryGroups');
+    const visibleCountEl = document.querySelector('#visibleCount');
+    const visibleLabelEl = document.querySelector('#visibleLabel');
     let scopes = [];
+
     const kindOrder = ['constraint', 'preference', 'decision', 'fact', 'project_context', 'procedure'];
     const kindLabels = {
       constraint: 'Constraints',
@@ -418,25 +483,13 @@ const HTML = `<!doctype html>
       procedure: 'Procedures'
     };
     const kindColors = {
-      constraint: '#8a5cf6',
-      preference: '#2f7e77',
-      decision: '#c26a2e',
-      fact: '#3f7db8',
-      project_context: '#3f7db8',
-      procedure: '#65758b'
+      constraint: '#7661a8',
+      preference: '#2d7267',
+      decision: '#b2763a',
+      fact: '#50749e',
+      project_context: '#50749e',
+      procedure: '#68737f'
     };
-
-    function setStatus(message) {
-      statusEl.textContent = message || '';
-    }
-
-    function clearSurface() {
-      ringEl.replaceChildren();
-      loopStepsEl.replaceChildren();
-      chartEl.replaceChildren();
-      memoryCountEl.textContent = '';
-      groupsEl.replaceChildren();
-    }
 
     function addText(parent, tag, text, className) {
       const el = document.createElement(tag);
@@ -450,18 +503,17 @@ const HTML = `<!doctype html>
       return 'kind-' + String(kind).replace(/[^a-z0-9_]/g, '_');
     }
 
-    function groupByKind(rows) {
+    function kindLabel(kind) {
+      return kindLabels[kind] || String(kind).replace(/_/g, ' ');
+    }
+
+    function sortedGroups(rows) {
       const grouped = new Map();
       for (const row of rows) {
         const bucket = grouped.get(row.kind) || [];
         bucket.push(row);
         grouped.set(row.kind, bucket);
       }
-      return grouped;
-    }
-
-    function sortedGroups(rows) {
-      const grouped = groupByKind(rows);
       return Array.from(grouped.entries()).sort(([left], [right]) => {
         const l = kindOrder.indexOf(left);
         const r = kindOrder.indexOf(right);
@@ -469,153 +521,133 @@ const HTML = `<!doctype html>
       });
     }
 
-    function conicForGroups(groups, total) {
-      if (total === 0) return 'radial-gradient(circle at center, #fff 0 43%, transparent 44%), #edf1f5';
-      let cursor = 0;
-      const segments = [];
-      for (const [kind, bucket] of groups) {
-        const end = cursor + (bucket.length / total) * 360;
-        const color = kindColors[kind] || '#65758b';
-        segments.push(color + ' ' + cursor.toFixed(2) + 'deg ' + end.toFixed(2) + 'deg');
-        cursor = end;
-      }
-      return 'radial-gradient(circle at center, #fff 0 43%, transparent 44%), conic-gradient(' + segments.join(', ') + ')';
+    function pointOnRing(index, total) {
+      const angle = (-95 + (360 / total) * index + (index % 2) * 4) * Math.PI / 180;
+      const radius = 33 + (index % 3) * 4;
+      return {
+        left: 50 + radius * Math.cos(angle),
+        top: 50 + radius * Math.sin(angle)
+      };
     }
 
-    function renderRing(groups, rows, selected) {
+    function renderRing(rows, selected) {
       ringEl.replaceChildren();
-      const circle = document.createElement('div');
-      circle.className = 'ring-circle';
-      circle.style.background = conicForGroups(groups, rows.length);
-
+      const ring = document.createElement('div');
+      ring.className = 'ring';
       const core = document.createElement('div');
-      core.className = 'ring-core';
-      addText(core, 'div', 'Active scope', 'core-label');
-      addText(core, 'div', selected ? selected.name : '-', 'core-value');
-      addText(core, 'div', rows.length + ' gated memories / standard local view', 'core-note');
+      core.className = 'core';
+      addText(core, 'div', 'Active scope', 'core-kicker');
+      addText(core, 'div', selected ? selected.name : '-', 'core-name');
+      addText(core, 'div', rows.length + ' visible after Gate', 'core-count');
+      const gate = addText(ringEl, 'div', 'Gate', 'gate-mark');
+      gate.setAttribute('aria-label', 'human_local_view standard Gate');
+      ringEl.append(ring, core);
 
-      ringEl.append(circle, core);
-      if (groups.length === 0) return;
+      if (rows.length === 0) {
+        addText(ringEl, 'div', 'Nothing visible in this scope.', 'ring-empty');
+        return;
+      }
 
-      const radius = 43;
-      groups.forEach(([kind, bucket], index) => {
-        const angle = -90 + (360 / groups.length) * index;
-        const rad = (angle * Math.PI) / 180;
-        const node = document.createElement('div');
-        node.className = 'ring-node ' + kindClass(kind);
-        node.style.left = 50 + radius * Math.cos(rad) + '%';
-        node.style.top = 50 + radius * Math.sin(rad) + '%';
-        node.style.borderTop = '4px solid ' + (kindColors[kind] || '#65758b');
-        addText(node, 'div', kindLabels[kind] || kind, 'node-label');
-        addText(node, 'div', String(bucket.length), 'node-count');
-        ringEl.appendChild(node);
+      const seeds = rows.slice(0, 36);
+      seeds.forEach((row, index) => {
+        const point = pointOnRing(index, seeds.length);
+        const seed = document.createElement('button');
+        seed.type = 'button';
+        seed.className = 'seed ' + kindClass(row.kind);
+        seed.style.left = point.left + '%';
+        seed.style.top = point.top + '%';
+        seed.style.setProperty('--kind-color', kindColors[row.kind] || '#68737f');
+        seed.setAttribute('aria-label', kindLabel(row.kind));
+        seed.addEventListener('click', () => {
+          const target = document.getElementById(row.claim_id);
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        ringEl.appendChild(seed);
       });
     }
 
-    function renderLoopSteps(rows, selected) {
-      loopStepsEl.replaceChildren();
-      const steps = [
-        ['Project scope', selected ? selected.name : 'No scope selected'],
-        ['Memory forms', rows.length + ' visible claims grouped by kind'],
-        ['Output Gate', 'human_local_view / standard'],
-        ['Local view', 'Read-only browser surface'],
-        ['Reuse', 'Context can return to the next AI session']
-      ];
-      steps.forEach(([title, copy], index) => {
-        const row = document.createElement('div');
-        row.className = 'loop-step';
-        addText(row, 'div', String(index + 1), 'step-index');
-        const body = document.createElement('div');
-        addText(body, 'div', title, 'step-title');
-        addText(body, 'div', copy, 'step-copy');
-        row.appendChild(body);
-        loopStepsEl.appendChild(row);
-      });
-    }
+    function renderSummary(groups, total) {
+      visibleCountEl.textContent = String(total);
+      visibleLabelEl.textContent = total === 1 ? 'visible memory' : 'visible memories';
+      kindListEl.replaceChildren();
 
-    function renderChart(groups, total) {
-      chartEl.replaceChildren();
       if (total === 0) {
-        addText(chartEl, 'div', 'No visible memory kinds.', 'status');
+        addText(kindListEl, 'div', 'No visible kinds.', 'status');
         return;
       }
 
       for (const [kind, bucket] of groups) {
         const row = document.createElement('div');
-        row.className = 'kind-row ' + kindClass(kind);
-        const meta = document.createElement('div');
-        meta.className = 'kind-meta';
-        addText(meta, 'span', kindLabels[kind] || kind);
-        addText(meta, 'span', String(bucket.length));
-        const track = document.createElement('div');
-        track.className = 'bar-track';
-        const fill = document.createElement('div');
-        fill.className = 'bar-fill';
-        fill.style.width = Math.max(6, Math.round((bucket.length / total) * 100)) + '%';
-        track.appendChild(fill);
-        row.append(meta, track);
-        chartEl.appendChild(row);
+        row.className = 'kind-line ' + kindClass(kind);
+        row.style.setProperty('--kind-color', kindColors[kind] || '#68737f');
+        addText(row, 'div', kindLabel(kind));
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        const fill = document.createElement('span');
+        fill.style.width = Math.max(8, Math.round((bucket.length / total) * 100)) + '%';
+        bar.appendChild(fill);
+        addText(row, 'div', String(bucket.length));
+        row.insertBefore(bar, row.children[1]);
+        kindListEl.appendChild(row);
       }
     }
 
     function renderRows(rows, selected) {
       const groups = sortedGroups(rows);
-      renderRing(groups, rows, selected);
-      renderLoopSteps(rows, selected);
-      renderChart(groups, rows.length);
+      renderRing(rows, selected);
+      renderSummary(groups, rows.length);
       groupsEl.replaceChildren();
-      memoryCountEl.textContent = rows.length + ' visible';
+      statusEl.textContent = rows.length + ' rows / human_local_view standard';
 
       if (rows.length === 0) {
-        addText(groupsEl, 'div', 'No memories in this scope.', 'empty');
+        addText(groupsEl, 'div', 'No memories in this scope passed the Gate.', 'empty');
         return;
       }
 
       for (const [kind, bucket] of groups) {
         const group = document.createElement('section');
         group.className = 'group ' + kindClass(kind);
-        const header = document.createElement('div');
-        header.className = 'group-header';
-        addText(header, 'h3', kindLabels[kind] || kind, 'group-title');
-        addText(header, 'span', bucket.length + ' visible', 'count');
-        group.appendChild(header);
+        group.style.setProperty('--kind-color', kindColors[kind] || '#68737f');
+        const title = document.createElement('div');
+        title.className = 'group-title';
+        addText(title, 'div', kindLabel(kind), 'group-name');
+        addText(title, 'div', bucket.length + ' visible', 'group-count');
+        group.appendChild(title);
 
         for (const row of bucket) {
-          const card = document.createElement('article');
-          card.className = 'memory-card ' + kindClass(row.kind);
-          const rail = document.createElement('div');
-          rail.className = 'memory-rail';
-          const body = document.createElement('div');
-          body.className = 'memory-body';
-          const meta = document.createElement('div');
-          meta.className = 'memory-meta';
-          addText(meta, 'span', row.sensitivity, 'sensitivity ' + row.sensitivity);
-          addText(meta, 'span', row.claim_id, 'claim-id');
-          addText(body, 'div', row.statement, 'statement');
-          body.prepend(meta);
-          card.append(rail, body);
-          group.appendChild(card);
+          const memory = document.createElement('article');
+          memory.id = row.claim_id;
+          memory.className = 'memory';
+          addText(memory, 'div', row.sensitivity, 'sensitivity ' + row.sensitivity);
+          addText(memory, 'div', row.statement, 'statement');
+          group.appendChild(memory);
         }
-
         groupsEl.appendChild(group);
       }
+    }
+
+    function clearSurface(message) {
+      ringEl.replaceChildren();
+      kindListEl.replaceChildren();
+      groupsEl.replaceChildren();
+      visibleCountEl.textContent = '0';
+      visibleLabelEl.textContent = 'visible memories';
+      statusEl.textContent = message || '';
     }
 
     async function loadMemories() {
       const selected = scopes.find((scope) => scope.project_id === select.value);
       if (!selected) {
-        clearSurface();
-        setStatus('Select a scope.');
+        clearSurface('Select a scope.');
         return;
       }
 
-      setStatus('Loading memories...');
+      statusEl.textContent = 'Loading...';
       const params = new URLSearchParams({ scope: selected.name, project: selected.project_id });
       const response = await fetch('/api/memories?' + params.toString());
       if (!response.ok) throw new Error('Failed to load memories');
       const rows = await response.json();
       renderRows(rows, selected);
-      setStatus(rows.length + ' visible');
     }
 
     async function loadScopes() {
@@ -623,13 +655,13 @@ const HTML = `<!doctype html>
       if (!response.ok) throw new Error('Failed to load scopes');
       scopes = await response.json();
       select.replaceChildren();
+
       if (scopes.length === 0) {
         const option = document.createElement('option');
         option.textContent = 'No scopes';
         select.appendChild(option);
         select.disabled = true;
-        clearSurface();
-        setStatus('No configured scopes.');
+        clearSurface('No configured scopes.');
         return;
       }
 
@@ -644,17 +676,13 @@ const HTML = `<!doctype html>
     }
 
     select.addEventListener('change', () => {
-      loadMemories().catch((error) => {
-        clearSurface();
-        setStatus(error.message);
-      });
+      loadMemories().catch((error) => clearSurface(error.message));
     });
 
     loadScopes().catch((error) => {
-      clearSurface();
       select.replaceChildren();
       select.disabled = true;
-      setStatus(error.message);
+      clearSurface(error.message);
     });
   </script>
 </body>
@@ -703,7 +731,7 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
-  const url = new URL(req.url ?? '/', `http://${HOST}`);
+  const url = new URL(req.url ?? '/', 'http://' + HOST);
   try {
     if (url.pathname === '/') {
       sendHtml(res);
@@ -738,7 +766,7 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, 404, { error: 'not_found' });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[memoring serve] request failed: ${message}`);
+    console.error('[memoring serve] request failed: ' + message);
     sendJson(res, 500, { error: 'internal_error' });
   }
 }
@@ -747,10 +775,10 @@ const port = configuredPort();
 const server = http.createServer(handleRequest);
 
 server.on('error', (error) => {
-  console.error(`[memoring serve] ${error.message}`);
+  console.error('[memoring serve] ' + error.message);
   process.exitCode = 1;
 });
 
 server.listen(port, HOST, () => {
-  console.log(`Memoring browser listening at http://${HOST}:${port}`);
+  console.log('Memoring browser listening at http://' + HOST + ':' + port);
 });
