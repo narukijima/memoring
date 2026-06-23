@@ -4,7 +4,7 @@
 // byte of output; it is never bolted on later. Gates 3–7, 13.
 import fs from 'node:fs';
 import path from 'node:path';
-import { gate, type GateItem, type GateRequest, bestClassificationState } from '@core/policy';
+import { gate, activeScopeContainsAll, type GateItem, type GateRequest, bestClassificationState } from '@core/policy';
 import { hmacHex } from '@security/crypto-primitives';
 import { renderMarkerBlock, signMarker } from '@security/ouroboros';
 import { newId } from '@core/schema/ids';
@@ -119,6 +119,10 @@ const KIND_SECTION: Record<string, string> = {
   procedure: 'Procedures',
 };
 
+function claimBridgeContained(sc: ScopedClaim, activeLabelIds: string[]): boolean {
+  return activeScopeContainsAll(sc.labelIds, activeLabelIds);
+}
+
 export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult {
   const now = opts.now ?? new Date();
   const audience: Audience = opts.audience ?? 'ai_tool';
@@ -156,6 +160,10 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   let dropped = 0;
   for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')) {
     const sc = toScoped(claim);
+    if (!claimBridgeContained(sc, activeLabelIds)) {
+      dropped += 1;
+      continue;
+    }
     if (!gate(toGateItem(ctx, sc), req).pass) {
       dropped += 1;
       continue;
@@ -170,7 +178,8 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   // as stale warnings (the Gate still hides secret / out-of-scope superseded claims).
   for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'superseded')) {
     const sc = toScoped(claim);
-    if (gate(toGateItem(ctx, sc), req).pass) staleOpen.push({ ...sc, staleReason: 'superseded' });
+    if (claimBridgeContained(sc, activeLabelIds) && gate(toGateItem(ctx, sc), req).pass)
+      staleOpen.push({ ...sc, staleReason: 'superseded' });
     else dropped += 1;
   }
   for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'conflicted')) {
@@ -181,6 +190,10 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
       continue;
     }
     const sc = toScoped(claim);
+    if (!claimBridgeContained(sc, activeLabelIds)) {
+      dropped += 1;
+      continue;
+    }
     const result = gate(toGateItem(ctx, sc), req);
     if (result.failed.length === 1 && result.failed[0] === 'not_conflicted_for_request') {
       conflictsOpen.push(sc);

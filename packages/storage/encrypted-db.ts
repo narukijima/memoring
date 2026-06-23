@@ -116,6 +116,85 @@ function releaseReplicaLock(lock: ReplicaLock): void {
   }
 }
 
+function objectAbsFromRef(objectsDir: string, ref: string): string {
+  return path.join(objectsDir, ref.replace(/^objects\//, ''));
+}
+
+function objectExists(objectsDir: string, ref: string): boolean {
+  return fs.existsSync(objectAbsFromRef(objectsDir, ref));
+}
+
+function collectObjectRefs(value: unknown, refs: Set<string>): void {
+  if (typeof value === 'string') {
+    if (value.startsWith('objects/')) refs.add(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) collectObjectRefs(v, refs);
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const v of Object.values(value as Record<string, unknown>)) collectObjectRefs(v, refs);
+}
+
+function listObjectRefsOnDisk(objectsDir: string): string[] {
+  const refs: string[] = [];
+  if (!fs.existsSync(objectsDir)) return refs;
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(abs);
+      } else if (entry.isFile()) {
+        refs.push(path.posix.join('objects', path.relative(objectsDir, abs).split(path.sep).join(path.posix.sep)));
+      }
+    }
+  };
+  walk(objectsDir);
+  return refs;
+}
+
+function reconcileObjects(db: Db, objectsDir: string): boolean {
+  let changed = false;
+  const referenced = new Set<string>();
+  const docTables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE '%doc TEXT%'")
+    .all() as { name: string }[];
+
+  for (const { name } of docTables) {
+    const rows = db.prepare(`SELECT doc FROM ${name}`).all() as { doc: string }[];
+    for (const row of rows) {
+      try {
+        collectObjectRefs(JSON.parse(row.doc), referenced);
+      } catch {
+        /* malformed docs are outside this repair pass */
+      }
+    }
+  }
+
+  for (const ref of listObjectRefsOnDisk(objectsDir)) {
+    if (referenced.has(ref)) continue;
+    fs.rmSync(objectAbsFromRef(objectsDir, ref), { force: true });
+    changed = true;
+  }
+
+  const events = db.prepare('SELECT event_id, doc FROM event WHERE status = ?').all('active') as {
+    event_id: string;
+    doc: string;
+  }[];
+  for (const row of events) {
+    const event = JSON.parse(row.doc) as { text_ref?: string | null; status: string };
+    if (!event.text_ref || objectExists(objectsDir, event.text_ref)) continue;
+    const repaired = { ...event, text_ref: null, status: 'redacted' };
+    db.prepare('UPDATE event SET status = ?, doc = ? WHERE event_id = ?').run('redacted', JSON.stringify(repaired), row.event_id);
+    db.prepare('DELETE FROM doc_index WHERE ref_id = ?').run(row.event_id);
+    db.prepare('DELETE FROM doc_fts WHERE ref_id = ?').run(row.event_id);
+    changed = true;
+  }
+
+  return changed;
+}
+
 export class EncryptedDb {
   private dirty = false;
   private closed = false;
@@ -137,6 +216,7 @@ export class EncryptedDb {
   static openOrCreate(blobPath: string, dek: Buffer): EncryptedDb {
     const lock = acquireReplicaLock(blobPath);
     let db: Db;
+    let reconciled = false;
     try {
       if (fs.existsSync(blobPath)) {
         const plain = aeadOpen(dek, fs.readFileSync(blobPath));
@@ -156,6 +236,7 @@ export class EncryptedDb {
         }
         // Re-apply config + idempotent DDL so format upgrades land on open.
         EncryptedDb.configure(db);
+        reconciled = reconcileObjects(db, path.join(path.dirname(blobPath), 'objects'));
       } else {
         db = new Database(':memory:');
         EncryptedDb.configure(db);
@@ -163,6 +244,9 @@ export class EncryptedDb {
           'store_format_version',
           String(STORE_FORMAT_VERSION),
         );
+      }
+      if (reconciled) {
+        atomicWriteFile(blobPath, aeadSeal(dek, db.serialize()), 0o600, true);
       }
     } catch (e) {
       releaseReplicaLock(lock);

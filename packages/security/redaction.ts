@@ -47,22 +47,33 @@ function tombstoneClaimFromPacks(ctx: RealmContext, claimId: string, now: Date):
   }
 }
 
-/** Redact one Event: drop normalized text + object, keep event_identity, deindex. */
-export function redactEvent(ctx: RealmContext, event: MemEvent, now = new Date()): void {
-  if (event.text_ref) {
+function deleteObjectsAfterFlush(ctx: RealmContext, refs: Array<string | null>, op: string): void {
+  ctx.flush();
+  for (const ref of [...new Set(refs.filter((r): r is string => Boolean(r)))]) {
     try {
-      ctx.objects.delete(event.text_ref);
+      ctx.objects.delete(ref);
     } catch (e) {
       // A failed unlink must not abort the cascade, but it must not be silent:
       // the recoverable AEAD payload may still be on disk (NFR-002). The ref is an
       // opaque id (no content), so it is safe to log (NFR-004).
-      log.warn('redact:blob_delete_failed', { ref: event.text_ref, msg: (e as Error).message });
+      log.warn(`${op}:blob_delete_failed`, { ref, msg: (e as Error).message });
     }
   }
+}
+
+function stageRedactEvent(ctx: RealmContext, event: MemEvent, now: Date): string | null {
+  const textRef = event.text_ref;
   const updated: MemEvent = { ...event, text_ref: null, status: 'redacted' };
   ctx.store.putEvent(updated);
   ctx.store.indexDelete(event.event_id);
   ctx.chronicler.append('redact', event.event_id, now);
+  return textRef;
+}
+
+/** Redact one Event: drop normalized text + object, keep event_identity, deindex. */
+export function redactEvent(ctx: RealmContext, event: MemEvent, now = new Date()): void {
+  const textRef = stageRedactEvent(ctx, event, now);
+  deleteObjectsAfterFlush(ctx, [textRef], 'redact');
 }
 
 /** After an evidence Event is gone, repair Claims that cited it. Also prunes any
@@ -111,13 +122,14 @@ export function redactEventById(
 ): boolean {
   const event = ctx.store.getEvent(eventId);
   if (!event) return false;
-  redactEvent(ctx, event, now);
+  const textRef = stageRedactEvent(ctx, event, now);
   if (opts.seal) createSealRule(ctx, 'event_identity', eventSealSignature(ctx.realmKey, event.event_identity), now);
   // A single-event redact does NOT tombstone the (possibly shared) Occurrence, so
   // its occurrence_id stays valid for sibling events — prune nothing here. Only
   // an actual Occurrence tombstone (deleteUndiluted) prunes occurrence_ids (§7.3).
   repairClaimsCiting(ctx, event.event_identity, new Set(), now);
   ctx.audit('redact', { event_id: eventId, sealed: opts.seal === true }, now);
+  deleteObjectsAfterFlush(ctx, [textRef], 'redact');
   return true;
 }
 
@@ -131,13 +143,7 @@ export function deleteUndiluted(
   const u = ctx.store.getUndiluted(undilutedId);
   if (!u) return { found: false, events: 0, claims: 0 };
 
-  try {
-    ctx.objects.delete(u.encrypted_payload_ref);
-  } catch (e) {
-    // Surface, don't swallow: the recoverable payload may still be on disk
-    // (NFR-002). The ref is an opaque id (no content) — safe to log (NFR-004).
-    log.warn('delete:blob_delete_failed', { ref: u.encrypted_payload_ref, msg: (e as Error).message });
-  }
+  const objectRefs: string[] = [u.encrypted_payload_ref];
   ctx.store.putUndiluted({ ...u, status: 'deleted' });
   tombstone(ctx, undilutedId, 'undiluted', now);
 
@@ -149,7 +155,8 @@ export function deleteUndiluted(
     tombstone(ctx, occ.occurrence_id, 'occurrence', now);
     tombstonedOccurrenceIds.add(occ.occurrence_id);
     for (const ev of ctx.store.listEventsForOccurrence(ctx.realmId, occ.occurrence_id)) {
-      redactEvent(ctx, ev, now);
+      const textRef = stageRedactEvent(ctx, ev, now);
+      if (textRef) objectRefs.push(textRef);
       affectedIdentities.push(ev.event_identity);
       if (opts.seal) createSealRule(ctx, 'event_identity', eventSealSignature(ctx.realmKey, ev.event_identity), now);
       events += 1;
@@ -162,6 +169,7 @@ export function deleteUndiluted(
   }
   ctx.chronicler.append('delete', undilutedId, now);
   ctx.audit('delete', { undiluted_id: undilutedId, events, claims: before.size, sealed: opts.seal === true }, now);
+  deleteObjectsAfterFlush(ctx, objectRefs, 'delete');
   return { found: true, events, claims: before.size };
 }
 
@@ -175,6 +183,7 @@ export function forgetClaim(
   const claim = ctx.store.getClaim(claimId);
   if (!claim) return false;
   const statement = readClaimStatement(ctx, claim);
+  const statementRef = claim.statement_ref;
   ctx.store.putClaim({ ...claim, status: 'redacted', conflict_reason: 'forgotten' });
   ctx.store.indexDelete(claimId);
   // Drop the dedup key so a later re-derivation produces a FRESH candidate that
@@ -195,6 +204,7 @@ export function forgetClaim(
     }
   }
   ctx.audit('redact', { claim_id: claimId, kind: claim.kind, sealed: opts.seal !== false }, now);
+  deleteObjectsAfterFlush(ctx, [statementRef], 'redact');
   return true;
 }
 
@@ -215,6 +225,7 @@ export function forgetByPattern(ctx: RealmContext, pattern: string, now = new Da
   }
   // Redact already-indexed Events whose text matches (drops text_ref + deindexes).
   let events = 0;
+  const eventTextRefs: string[] = [];
   for (const ev of ctx.store.listEvents(ctx.realmId)) {
     if (ev.status !== 'active' || !ev.text_ref) continue;
     let text: string;
@@ -224,7 +235,8 @@ export function forgetByPattern(ctx: RealmContext, pattern: string, now = new Da
       continue;
     }
     if (re.test(text)) {
-      redactEvent(ctx, ev, now);
+      const textRef = stageRedactEvent(ctx, ev, now);
+      if (textRef) eventTextRefs.push(textRef);
       repairClaimsCiting(ctx, ev.event_identity, new Set(), now);
       events += 1;
     }
@@ -233,6 +245,7 @@ export function forgetByPattern(ctx: RealmContext, pattern: string, now = new Da
   // The regex source is stored so isClaimSuppressed / normalize / index re-evaluate it.
   createSealRule(ctx, 'pattern', patternSealSignature(ctx.realmKey, pattern), now, pattern);
   ctx.audit('seal_pattern', { matched_claims: count, matched_events: events }, now);
+  deleteObjectsAfterFlush(ctx, eventTextRefs, 'redact');
   return count;
 }
 

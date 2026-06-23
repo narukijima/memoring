@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runSecretScan, scanText } from '@security/secret-scan';
+import { allowedSensitivity } from '@core/policy';
+import { maxSensitivity } from '@core/schema/enums';
 
 describe('Secret Scan (G3 / CON-007)', () => {
   it('detects common credential shapes', () => {
@@ -47,6 +49,20 @@ describe('Secret Scan (G3 / CON-007)', () => {
     const r = runSecretScan('evt_1', 'here: sk-abc1234567890ABCDEFGHIJ1234567890');
     expect(r.secret_detected).toBe(true);
     expect(r.secret_scan_passed).toBe(true); // scan completed; sensitivity is forced secret upstream
+  });
+
+  it('pins the owner-accepted low-default-sensitivity boundary for matched credentials', () => {
+    const r = runSecretScan('evt_1', `OPENAI_API_KEY=sk-proj-${'A'.repeat(48)}`);
+    expect(r.secret_detected).toBe(true);
+
+    // Current v0 contract: RULES-matched credential shapes force the whole Event
+    // to secret upstream. Span masking is OUT-014; unmatched shapes may follow the
+    // explicit project default, so the rule set is the fail-open boundary.
+    expect(allowedSensitivity('secret', 'ai_tool', 'standard')).toBe(false);
+    expect(allowedSensitivity('secret', 'remote_ai_processing', 'standard')).toBe(false);
+    expect(allowedSensitivity('secret', 'export', 'standard')).toBe(false);
+    expect(allowedSensitivity('secret', 'human_local_view', 'full_access')).toBe(false);
+    expect(maxSensitivity('secret', 'internal')).toBe('secret'); // classify.ts never lowers secret
   });
 
   it('scans a long dotted token in linear time (no connection_string ReDoS)', () => {
