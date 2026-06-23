@@ -182,6 +182,43 @@ describe('delete / redact cascade (G10 / §7.3)', () => {
   });
 });
 
+describe('physical blob deletion (NFR-002 / §7.3 — delete is physical, not just deindexed)', () => {
+  // Status flips, tombstones, and search-absence all pass even if `objects.delete`
+  // silently no-op'd — leaving the recoverable AEAD payload on disk. Only a direct
+  // store probe catches that, so these assertions guard the one invariant the
+  // search-absence tests structurally cannot see (the 2026-06-23 audit gap).
+  it('redactEventById physically removes the event text blob from the object store', () => {
+    const ctx = seeded.realm.ctx;
+    const decision = consolidatedByKind('decision');
+    const event = ctx.store.findEventByIdentity(ctx.realmId, decision.evidence_event_identities[0]!)!;
+    const textRef = event.text_ref!;
+    expect(textRef).toBeTruthy();
+    // Precondition: the encrypted blob is readable on disk before redaction.
+    expect(ctx.objects.exists(textRef)).toBe(true);
+    expect(() => ctx.objects.get(textRef)).not.toThrow();
+
+    redactEventById(ctx, event.event_id, { seal: false });
+
+    // The recoverable payload must be physically gone, not merely excluded from
+    // the index/output.
+    expect(ctx.objects.exists(textRef)).toBe(false);
+    expect(() => ctx.objects.get(textRef)).toThrow();
+  });
+
+  it('deleteUndiluted physically removes the Undiluted payload blob from the object store', () => {
+    const ctx = seeded.realm.ctx;
+    const anyEvent = ctx.store.listEvents(ctx.realmId)[0]!;
+    const occ = ctx.store.getOccurrence(anyEvent.occurrence_ids[0]!)!;
+    const payloadRef = ctx.store.getUndiluted(occ.undiluted_id)!.encrypted_payload_ref;
+    expect(ctx.objects.exists(payloadRef)).toBe(true);
+
+    expect(deleteUndiluted(ctx, occ.undiluted_id, { seal: true }).found).toBe(true);
+
+    expect(ctx.objects.exists(payloadRef)).toBe(false);
+    expect(() => ctx.objects.get(payloadRef)).toThrow();
+  });
+});
+
 describe('claim correction safety', () => {
   it('escalates corrected statement text containing a secret and removes it from egress', async () => {
     const ctx = seeded.realm.ctx;
