@@ -15,6 +15,11 @@ export interface MemoryRow {
   statement: string;
   sensitivity: Claim['sensitivity'];
   labelIds: string[];
+  status: Claim['status'];
+  evidenceCount: number;
+  validFrom: string;
+  validUntil: string | null;
+  supersedes: string[];
 }
 
 function resolveProjectIds(ctx: RealmContext, projectIdOrName: string): string[] {
@@ -49,6 +54,11 @@ export function listMemoriesForView(ctx: RealmContext, opts: BrowseOptions): Mem
       statement: sc.statement,
       sensitivity: claim.sensitivity,
       labelIds: sc.labelIds,
+      status: claim.status,
+      evidenceCount: claim.evidence_count,
+      validFrom: claim.valid_from,
+      validUntil: claim.valid_until,
+      supersedes: claim.supersedes,
     });
   }
 

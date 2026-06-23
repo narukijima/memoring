@@ -16,19 +16,31 @@ const HTML = `<!doctype html>
     :root {
       color-scheme: light;
       font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --bg: #f6f7f5;
+      --bg: #f5f7f4;
       --panel: #ffffff;
-      --ink: #1d2421;
-      --muted: #69736f;
-      --quiet: #9aa39f;
-      --line: #dde3df;
-      --line-strong: #c8d2cd;
-      --green: #2d7267;
-      --green-soft: #e5f0ec;
-      --violet: #7661a8;
-      --amber: #b2763a;
-      --blue: #50749e;
-      --slate: #68737f;
+      --panel-soft: #f9fbf8;
+      --ink: #121816;
+      --muted: #64706a;
+      --quiet: #8f9893;
+      --line: #dfe5e0;
+      --line-strong: #c3ccc6;
+      --memory-black: #121816;
+      --memory-green: #0f5d46;
+      --memory-green-2: #28745a;
+      --memory-green-soft: #e5f1eb;
+      --memory-green-line: #aacbbb;
+      --memory-silver: #d9ded9;
+      --memory-gold: #b88a2e;
+      --memory-gold-soft: #f7edd9;
+      --green: var(--memory-green);
+      --green-soft: var(--memory-green-soft);
+      --green-line: var(--memory-green-line);
+      --violet: #4f635c;
+      --amber: var(--memory-gold);
+      --blue: #3f6757;
+      --slate: #68736d;
+      --danger: #9c4f48;
+      --shadow: 0 12px 30px rgba(18, 24, 22, 0.08);
     }
     * {
       box-sizing: border-box;
@@ -40,352 +52,405 @@ const HTML = `<!doctype html>
       color: var(--ink);
     }
     main {
-      max-width: 1120px;
+      max-width: 1280px;
       margin: 0 auto;
-      padding: 28px 28px 40px;
+      padding: 22px 28px 34px;
     }
     .topbar {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 24px;
-      align-items: end;
-      margin-bottom: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      min-height: 62px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
     }
-    .eyebrow {
-      color: var(--green);
-      font-size: 12px;
-      font-weight: 780;
-      letter-spacing: 0;
+    .brand {
+      display: flex;
+      align-items: center;
+      min-width: 0;
     }
     h1 {
-      margin: 5px 0 0;
-      font-size: 34px;
-      line-height: 1.05;
-      font-weight: 820;
+      margin: 0;
+      color: var(--memory-black);
+      font-size: 24px;
+      line-height: 1.1;
+      font-weight: 850;
       letter-spacing: 0;
     }
     .subline {
-      margin-top: 9px;
+      margin-top: 4px;
       color: var(--muted);
-      font-size: 14px;
-      line-height: 1.45;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .top-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .badge,
+    .chip,
+    .kind-tab {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: #3d4743;
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 720;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .badge.safe {
+      border-color: var(--green-line);
+      background: var(--green-soft);
+      color: var(--green);
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(260px, 420px) auto;
+      gap: 12px;
+      align-items: end;
+      padding: 18px 0;
     }
     label {
       display: grid;
       gap: 7px;
       color: var(--muted);
       font-size: 12px;
-      font-weight: 720;
+      font-weight: 740;
     }
-    select {
-      min-width: 260px;
-      height: 38px;
+    select,
+    input {
+      width: 100%;
+      height: 40px;
       border: 1px solid var(--line-strong);
-      border-radius: 999px;
+      border-radius: 8px;
       background: var(--panel);
       color: var(--ink);
-      padding: 0 14px;
+      padding: 0 12px;
       font: inherit;
       font-size: 14px;
     }
-    select:focus {
-      outline: 2px solid rgba(45, 114, 103, 0.22);
+    select:focus,
+    input:focus,
+    button:focus-visible {
+      outline: 2px solid rgba(39, 105, 95, 0.22);
       outline-offset: 2px;
     }
-    .surface {
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      background: rgba(255, 255, 255, 0.74);
-      padding: 24px;
+    .clear-button {
+      height: 40px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--panel);
+      color: #35403c;
+      padding: 0 13px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 750;
+      cursor: pointer;
     }
-    .ring-row {
-      display: grid;
-      grid-template-columns: minmax(430px, 1fr) 300px;
-      gap: 26px;
+    .clear-button:hover {
+      border-color: #d8bd7d;
+      color: #755616;
+    }
+    .filters {
+      display: flex;
       align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding-bottom: 18px;
     }
-    .ring-wrap {
-      position: relative;
-      min-height: 500px;
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      overflow-x: auto;
+      padding-bottom: 1px;
     }
-    .ring {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      z-index: 1;
-      width: 410px;
-      height: 410px;
-      transform: translate(-50%, -50%);
-      border-radius: 50%;
-      border: 1px solid rgba(45, 114, 103, 0.24);
-      background:
-        radial-gradient(circle, var(--bg) 0 45%, transparent 46%),
-        conic-gradient(from -75deg, rgba(45, 114, 103, 0.92), rgba(80, 116, 158, 0.72), rgba(118, 97, 168, 0.68), rgba(178, 118, 58, 0.72), rgba(45, 114, 103, 0.92));
-      box-shadow: inset 0 0 0 31px rgba(255, 255, 255, 0.82);
+    .kind-tab {
+      cursor: pointer;
     }
-    .ring::before,
-    .ring::after {
-      content: "";
-      position: absolute;
-      border-radius: 50%;
-      pointer-events: none;
+    .kind-tab[aria-pressed="true"] {
+      border-color: #d8bd7d;
+      background: var(--memory-gold-soft);
+      color: #755616;
     }
-    .ring::before {
-      inset: 58px;
-      border: 1px solid rgba(29, 36, 33, 0.10);
+    .sensitivity-filter {
+      width: 170px;
+      flex: 0 0 auto;
     }
-    .ring::after {
-      inset: -34px;
-      border: 1px solid rgba(200, 210, 205, 0.60);
-    }
-    .core {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      z-index: 2;
-      width: 196px;
-      min-height: 150px;
-      transform: translate(-50%, -50%);
-      border: 1px solid var(--line);
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.95);
+    .layout {
       display: grid;
-      place-items: center;
-      text-align: center;
-      padding: 24px;
+      grid-template-columns: 260px minmax(0, 1fr) 320px;
+      gap: 18px;
+      align-items: start;
     }
-    .core-kicker {
-      color: var(--green);
-      font-size: 11px;
-      font-weight: 780;
-      text-transform: uppercase;
-      letter-spacing: 0;
+    .sidebar,
+    .content,
+    .detail {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
     }
-    .core-name {
-      width: 100%;
-      margin-top: 6px;
-      font-size: 21px;
-      line-height: 1.08;
-      font-weight: 810;
-      overflow-wrap: anywhere;
+    .sidebar,
+    .detail {
+      position: sticky;
+      top: 18px;
+      overflow: hidden;
     }
-    .core-count {
-      margin-top: 7px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.35;
+    .summary-head {
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
     }
-    .gate-mark {
-      position: absolute;
-      right: 5%;
-      top: 50%;
-      z-index: 3;
-      width: 86px;
-      transform: translateY(-50%);
-      border: 1px solid rgba(45, 114, 103, 0.28);
-      border-radius: 999px;
-      background: var(--green-soft);
-      color: #285f57;
-      padding: 7px 10px;
-      text-align: center;
-      font-size: 12px;
-      font-weight: 760;
+    .summary-title,
+    .section-title {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.25;
     }
-    .gate-mark::before {
-      content: "";
-      position: absolute;
-      left: -76px;
-      top: 50%;
-      width: 75px;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(45, 114, 103, 0.45));
-    }
-    .seed {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      z-index: 4;
-      width: 10px;
-      height: 10px;
-      transform: translate(-50%, -50%);
-      border: 2px solid var(--panel);
-      border-radius: 50%;
-      background: var(--kind-color, var(--green));
-      box-shadow: 0 0 0 5px rgba(45, 114, 103, 0.08);
-    }
-    .ring-empty {
-      position: absolute;
-      left: 50%;
-      top: 76%;
-      transform: translateX(-50%);
+    .scope-name {
+      margin-top: 8px;
       color: var(--muted);
       font-size: 13px;
-      text-align: center;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
     }
-    .summary {
-      align-self: stretch;
+    .stat-grid {
       display: grid;
-      align-content: center;
-      gap: 18px;
-      border-left: 1px solid var(--line);
-      padding-left: 26px;
+      grid-template-columns: 1fr 1fr;
+      border-bottom: 1px solid var(--line);
     }
     .stat {
       display: grid;
       gap: 4px;
+      padding: 16px 18px;
+      border-right: 1px solid var(--line);
+    }
+    .stat:last-child {
+      border-right: 0;
     }
     .stat-value {
-      font-size: 32px;
+      font-size: 25px;
       line-height: 1;
-      font-weight: 820;
+      font-weight: 830;
     }
     .stat-label {
       color: var(--muted);
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 7px;
-    }
-    .chip {
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.64);
-      color: #46504c;
-      padding: 5px 9px;
       font-size: 12px;
-      font-weight: 700;
-      white-space: nowrap;
+      line-height: 1.3;
     }
     .kind-list {
       display: grid;
-      gap: 9px;
+      gap: 0;
+      padding: 8px 0;
     }
     .kind-line {
       display: grid;
-      grid-template-columns: 92px minmax(0, 1fr) 28px;
-      gap: 9px;
+      grid-template-columns: minmax(0, 1fr) 34px;
+      gap: 10px;
       align-items: center;
+      padding: 9px 18px;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 13px;
     }
-    .bar {
-      height: 6px;
-      overflow: hidden;
-      border-radius: 999px;
-      background: #e8ece9;
+    .kind-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
     }
-    .bar > span {
-      display: block;
-      height: 100%;
-      width: 0;
-      border-radius: inherit;
+    .kind-dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 50%;
       background: var(--kind-color, var(--green));
     }
-    .list-section {
-      margin-top: 18px;
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      background: var(--panel);
-      overflow: hidden;
+    .kind-count {
+      justify-self: end;
+      color: var(--ink);
+      font-weight: 760;
     }
-    .list-head {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 18px;
+    .content-head {
+      display: flex;
       align-items: center;
+      justify-content: space-between;
+      gap: 14px;
       padding: 16px 18px;
       border-bottom: 1px solid var(--line);
-    }
-    h2 {
-      margin: 0;
-      font-size: 17px;
-      font-weight: 810;
-      letter-spacing: 0;
     }
     .status {
       color: var(--muted);
       font-size: 13px;
       line-height: 1.4;
-      white-space: nowrap;
+      text-align: right;
     }
-    .groups {
+    .rows {
       display: grid;
-      gap: 0;
-    }
-    .group {
-      padding: 16px 18px 18px;
-      border-top: 1px solid var(--line);
-    }
-    .group:first-child {
-      border-top: 0;
-    }
-    .group-title {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      margin-bottom: 9px;
-      color: #343d39;
-      font-size: 13px;
-      font-weight: 780;
-    }
-    .group-name {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .group-name::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--kind-color, var(--green));
-    }
-    .group-count {
-      color: var(--quiet);
-      font-size: 12px;
-      font-weight: 700;
     }
     .memory {
       display: grid;
-      grid-template-columns: 96px minmax(0, 1fr);
-      gap: 14px;
-      padding: 11px 0;
-      border-top: 1px solid #edf0ee;
+      grid-template-columns: 132px minmax(0, 1fr) 120px;
+      gap: 16px;
+      align-items: start;
+      width: 100%;
+      padding: 15px 18px;
+      border: 0;
+      border-top: 1px solid var(--line);
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
     }
-    .memory:first-of-type {
+    .memory:first-child {
       border-top: 0;
     }
+    .memory:hover,
+    .memory[aria-selected="true"] {
+      background: var(--panel-soft);
+    }
+    .memory[aria-selected="true"] {
+      box-shadow: inset 3px 0 0 var(--memory-gold);
+    }
+    .kind-pill,
     .sensitivity {
-      align-self: start;
       width: max-content;
       max-width: 100%;
-      border-radius: 999px;
-      background: #edf2ef;
-      color: #365e56;
-      padding: 4px 8px;
+      border-radius: 8px;
+      padding: 5px 8px;
       font-size: 11px;
-      font-weight: 760;
+      font-weight: 780;
+      line-height: 1;
       text-transform: uppercase;
     }
-    .sensitivity.internal {
-      background: #e9edf3;
-      color: #485f80;
+    .kind-pill {
+      border: 1px solid color-mix(in srgb, var(--kind-color, var(--green)) 30%, white);
+      background: color-mix(in srgb, var(--kind-color, var(--green)) 10%, white);
+      color: var(--kind-color, var(--green));
     }
     .statement {
       min-width: 0;
       color: var(--ink);
       font-size: 14px;
-      line-height: 1.52;
+      line-height: 1.55;
       overflow-wrap: anywhere;
     }
-    .empty {
+    .labels {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .label-chip {
+      max-width: 190px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--muted);
+      padding: 4px 7px;
+      font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .sensitivity {
+      justify-self: end;
+      background: #edf2ef;
+      color: #365e56;
+    }
+    .sensitivity.public {
+      background: #e8f2ee;
+      color: #27695f;
+    }
+    .sensitivity.internal {
+      background: #e9edf3;
+      color: #485f80;
+    }
+    .detail-head {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .detail-body {
+      display: grid;
+      gap: 18px;
       padding: 18px;
+    }
+    .detail-statement {
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.48;
+      overflow-wrap: anywhere;
+    }
+    .detail-section {
+      display: grid;
+      gap: 9px;
+    }
+    .detail-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .meta-item {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 10px;
+    }
+    .meta-value {
+      min-width: 0;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 760;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+    .relationship-list {
+      display: grid;
+      gap: 8px;
+    }
+    .relationship {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .muted {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .empty {
+      padding: 26px 18px;
       color: var(--muted);
       font-size: 14px;
+      line-height: 1.45;
     }
     .kind-constraint { --kind-color: var(--violet); }
     .kind-preference { --kind-color: var(--green); }
@@ -393,30 +458,85 @@ const HTML = `<!doctype html>
     .kind-fact,
     .kind-project_context { --kind-color: var(--blue); }
     .kind-procedure { --kind-color: var(--slate); }
-    @media (max-width: 900px) {
+    @media (max-width: 960px) {
       main {
-        padding: 20px;
+        padding: 18px;
       }
       .topbar,
-      .ring-row,
-      .list-head {
+      .filters {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .top-actions {
+        justify-content: flex-start;
+      }
+      .controls,
+      .layout {
         grid-template-columns: 1fr;
       }
-      .summary {
-        border-left: 0;
+      .content-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .status {
+        text-align: left;
+      }
+      .sidebar,
+      .detail {
+        position: static;
+      }
+      .memory {
+        grid-template-columns: 1fr;
+        gap: 9px;
+      }
+      .sensitivity {
+        justify-self: start;
+      }
+      .sensitivity-filter {
+        width: 100%;
+      }
+    }
+    @media (max-width: 620px) {
+      main {
+        padding: 14px;
+      }
+      .top-actions,
+      .tabs {
+        gap: 6px;
+      }
+      .tabs {
+        flex-wrap: wrap;
+        overflow: visible;
+      }
+      .badge,
+      .kind-tab {
+        min-height: 28px;
+        padding: 0 8px;
+        font-size: 11px;
+      }
+      .controls {
+        padding: 14px 0;
+      }
+      .filters {
+        padding-bottom: 14px;
+      }
+      .summary-head,
+      .content-head,
+      .detail-head,
+      .detail-body,
+      .memory {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+      .stat-grid {
+        grid-template-columns: 1fr;
+      }
+      .stat {
+        border-right: 0;
         border-top: 1px solid var(--line);
-        padding-left: 0;
-        padding-top: 20px;
       }
-      .ring-wrap {
-        min-height: 460px;
-      }
-      .ring {
-        width: 360px;
-        height: 360px;
-      }
-      .gate-mark {
-        right: 0;
+      .stat:first-child {
+        border-top: 0;
       }
     }
   </style>
@@ -424,54 +544,96 @@ const HTML = `<!doctype html>
 <body>
   <main>
     <header class="topbar">
-      <div>
-        <div class="eyebrow">local memory browser</div>
-        <h1>Memoring</h1>
-        <div class="subline">Scoped memories orbit the active project. Only rows that pass the local-view Gate are visible.</div>
+      <div class="brand">
+        <div>
+          <h1>Memoring</h1>
+          <div class="subline">Local read-only browser for scoped Claims after the Gate.</div>
+        </div>
       </div>
+      <div class="top-actions" aria-label="Runtime safeguards">
+        <span class="badge safe">human_local_view</span>
+        <span class="badge safe">standard Gate</span>
+        <span class="badge">127.0.0.1</span>
+        <span class="badge">read-only</span>
+      </div>
+    </header>
+
+    <section class="controls" aria-label="Memory controls">
       <label>
         Scope
         <select id="scopeSelect" disabled>
           <option>Loading scopes...</option>
         </select>
       </label>
-    </header>
+      <label>
+        Search
+        <input id="searchInput" type="search" placeholder="Filter visible Claim text or label id">
+      </label>
+      <button id="clearButton" class="clear-button" type="button">Clear</button>
+    </section>
 
-    <section class="surface" aria-label="Memory ring">
-      <div class="ring-row">
-        <div id="ring" class="ring-wrap"></div>
-        <aside class="summary" aria-label="View summary">
+    <section class="filters" aria-label="Memory filters">
+      <div id="kindTabs" class="tabs" aria-label="Kind filter"></div>
+      <select id="sensitivitySelect" class="sensitivity-filter" aria-label="Sensitivity filter">
+        <option value="all">All sensitivity</option>
+        <option value="public">Public</option>
+        <option value="internal">Internal</option>
+      </select>
+    </section>
+
+    <div class="layout">
+      <aside class="sidebar" aria-label="View summary">
+        <div class="summary-head">
+          <h2 class="summary-title">Active view</h2>
+          <div id="scopeName" class="scope-name">No scope selected.</div>
+        </div>
+        <div class="stat-grid">
           <div class="stat">
             <div id="visibleCount" class="stat-value">0</div>
-            <div id="visibleLabel" class="stat-label">visible memories</div>
+            <div id="visibleLabel" class="stat-label">visible after Gate</div>
           </div>
-          <div class="chips" aria-label="Safeguards">
-            <span class="chip">127.0.0.1</span>
-            <span class="chip">read-only</span>
-            <span class="chip">standard Gate</span>
+          <div class="stat">
+            <div id="filteredCount" class="stat-value">0</div>
+            <div class="stat-label">shown now</div>
           </div>
-          <div id="kindList" class="kind-list"></div>
-        </aside>
-      </div>
-    </section>
+        </div>
+        <div id="kindList" class="kind-list"></div>
+      </aside>
 
-    <section class="list-section" aria-label="Gated memories">
-      <div class="list-head">
-        <h2>Gated memories</h2>
-        <div id="status" class="status"></div>
-      </div>
-      <div id="groups" class="groups"></div>
-    </section>
+      <section class="content" aria-label="Claim list">
+        <div class="content-head">
+          <h2 class="section-title">Claim list</h2>
+          <div id="status" class="status"></div>
+        </div>
+        <div id="rows" class="rows"></div>
+      </section>
+
+      <aside class="detail" aria-label="Claim detail">
+        <div class="detail-head">
+          <h2 class="section-title">Claim detail</h2>
+        </div>
+        <div id="detailBody" class="detail-body"></div>
+      </aside>
+    </div>
   </main>
   <script>
     const select = document.querySelector('#scopeSelect');
-    const ringEl = document.querySelector('#ring');
+    const searchInput = document.querySelector('#searchInput');
+    const clearButton = document.querySelector('#clearButton');
+    const sensitivitySelect = document.querySelector('#sensitivitySelect');
+    const kindTabsEl = document.querySelector('#kindTabs');
     const kindListEl = document.querySelector('#kindList');
-    const groupsEl = document.querySelector('#groups');
+    const rowsEl = document.querySelector('#rows');
+    const detailBodyEl = document.querySelector('#detailBody');
     const statusEl = document.querySelector('#status');
     const visibleCountEl = document.querySelector('#visibleCount');
+    const filteredCountEl = document.querySelector('#filteredCount');
     const visibleLabelEl = document.querySelector('#visibleLabel');
+    const scopeNameEl = document.querySelector('#scopeName');
     let scopes = [];
+    let currentRows = [];
+    let activeKind = 'all';
+    let selectedClaimId = null;
 
     const kindOrder = ['constraint', 'preference', 'decision', 'fact', 'project_context', 'procedure'];
     const kindLabels = {
@@ -483,12 +645,12 @@ const HTML = `<!doctype html>
       procedure: 'Procedures'
     };
     const kindColors = {
-      constraint: '#7661a8',
-      preference: '#2d7267',
-      decision: '#b2763a',
-      fact: '#50749e',
-      project_context: '#50749e',
-      procedure: '#68737f'
+      constraint: '#4f635c',
+      preference: '#0f5d46',
+      decision: '#b88a2e',
+      fact: '#3f6757',
+      project_context: '#3f6757',
+      procedure: '#68736d'
     };
 
     function addText(parent, tag, text, className) {
@@ -521,58 +683,49 @@ const HTML = `<!doctype html>
       });
     }
 
-    function pointOnRing(index, total) {
-      const angle = (-95 + (360 / total) * index + (index % 2) * 4) * Math.PI / 180;
-      const radius = 33 + (index % 3) * 4;
-      return {
-        left: 50 + radius * Math.cos(angle),
-        top: 50 + radius * Math.sin(angle)
-      };
+    function orderedKinds(rows) {
+      return sortedGroups(rows).map(([kind]) => kind);
     }
 
-    function renderRing(rows, selected) {
-      ringEl.replaceChildren();
-      const ring = document.createElement('div');
-      ring.className = 'ring';
-      const core = document.createElement('div');
-      core.className = 'core';
-      addText(core, 'div', 'Active scope', 'core-kicker');
-      addText(core, 'div', selected ? selected.name : '-', 'core-name');
-      addText(core, 'div', rows.length + ' visible after Gate', 'core-count');
-      const gate = addText(ringEl, 'div', 'Gate', 'gate-mark');
-      gate.setAttribute('aria-label', 'human_local_view standard Gate');
-      ringEl.append(ring, core);
-
-      if (rows.length === 0) {
-        addText(ringEl, 'div', 'Nothing visible in this scope.', 'ring-empty');
-        return;
-      }
-
-      const seeds = rows.slice(0, 36);
-      seeds.forEach((row, index) => {
-        const point = pointOnRing(index, seeds.length);
-        const seed = document.createElement('button');
-        seed.type = 'button';
-        seed.className = 'seed ' + kindClass(row.kind);
-        seed.style.left = point.left + '%';
-        seed.style.top = point.top + '%';
-        seed.style.setProperty('--kind-color', kindColors[row.kind] || '#68737f');
-        seed.setAttribute('aria-label', kindLabel(row.kind));
-        seed.addEventListener('click', () => {
-          const target = document.getElementById(row.claim_id);
-          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        });
-        ringEl.appendChild(seed);
+    function renderKindTabs(rows) {
+      const kinds = orderedKinds(rows);
+      if (activeKind !== 'all' && !kinds.includes(activeKind)) activeKind = 'all';
+      kindTabsEl.replaceChildren();
+      const all = document.createElement('button');
+      all.type = 'button';
+      all.className = 'kind-tab';
+      all.setAttribute('aria-pressed', String(activeKind === 'all'));
+      all.textContent = 'All';
+      all.addEventListener('click', () => {
+        activeKind = 'all';
+        render();
       });
+      kindTabsEl.appendChild(all);
+
+      for (const kind of kinds) {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'kind-tab ' + kindClass(kind);
+        tab.style.setProperty('--kind-color', kindColors[kind] || '#68737f');
+        tab.setAttribute('aria-pressed', String(activeKind === kind));
+        tab.textContent = kindLabel(kind);
+        tab.addEventListener('click', () => {
+          activeKind = kind;
+          render();
+        });
+        kindTabsEl.appendChild(tab);
+      }
     }
 
-    function renderSummary(groups, total) {
+    function renderSummary(groups, total, filteredTotal, selected) {
       visibleCountEl.textContent = String(total);
-      visibleLabelEl.textContent = total === 1 ? 'visible memory' : 'visible memories';
+      filteredCountEl.textContent = String(filteredTotal);
+      visibleLabelEl.textContent = 'Claims after Gate';
+      scopeNameEl.textContent = selected ? selected.name + ' / ' + selected.project_id : 'No scope selected.';
       kindListEl.replaceChildren();
 
       if (total === 0) {
-        addText(kindListEl, 'div', 'No visible kinds.', 'status');
+        addText(kindListEl, 'div', 'No Claim kinds are visible in this scope.', 'empty');
         return;
       }
 
@@ -580,58 +733,167 @@ const HTML = `<!doctype html>
         const row = document.createElement('div');
         row.className = 'kind-line ' + kindClass(kind);
         row.style.setProperty('--kind-color', kindColors[kind] || '#68737f');
-        addText(row, 'div', kindLabel(kind));
-        const bar = document.createElement('div');
-        bar.className = 'bar';
-        const fill = document.createElement('span');
-        fill.style.width = Math.max(8, Math.round((bucket.length / total) * 100)) + '%';
-        bar.appendChild(fill);
-        addText(row, 'div', String(bucket.length));
-        row.insertBefore(bar, row.children[1]);
+        const name = document.createElement('div');
+        name.className = 'kind-name';
+        addText(name, 'span', '', 'kind-dot');
+        addText(name, 'span', kindLabel(kind));
+        row.appendChild(name);
+        addText(row, 'div', String(bucket.length), 'kind-count');
         kindListEl.appendChild(row);
       }
     }
 
-    function renderRows(rows, selected) {
-      const groups = sortedGroups(rows);
-      renderRing(rows, selected);
-      renderSummary(groups, rows.length);
-      groupsEl.replaceChildren();
-      statusEl.textContent = rows.length + ' rows / human_local_view standard';
+    function filterRows(rows) {
+      const query = searchInput.value.trim().toLowerCase();
+      const sensitivity = sensitivitySelect.value;
+      return rows.filter((row) => {
+        if (activeKind !== 'all' && row.kind !== activeKind) return false;
+        if (sensitivity !== 'all' && row.sensitivity !== sensitivity) return false;
+        if (!query) return true;
+        const haystack = [row.statement, row.kind, row.sensitivity, ...(row.labelIds || [])].join(' ').toLowerCase();
+        return haystack.includes(query);
+      });
+    }
 
-      if (rows.length === 0) {
-        addText(groupsEl, 'div', 'No memories in this scope passed the Gate.', 'empty');
+    function formatDate(value) {
+      if (!value) return 'None';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toISOString().slice(0, 10);
+    }
+
+    function detailMeta(label, value) {
+      const item = document.createElement('div');
+      item.className = 'meta-item';
+      addText(item, 'div', label, 'detail-label');
+      addText(item, 'div', value, 'meta-value');
+      return item;
+    }
+
+    function renderDetail(rows) {
+      detailBodyEl.replaceChildren();
+      const row = rows.find((candidate) => candidate.claim_id === selectedClaimId) || rows[0] || null;
+      selectedClaimId = row ? row.claim_id : null;
+
+      if (!row) {
+        addText(detailBodyEl, 'div', 'Select a Claim to inspect gated metadata, evidence count, scope labels, and supersedes links.', 'muted');
         return;
       }
 
-      for (const [kind, bucket] of groups) {
-        const group = document.createElement('section');
-        group.className = 'group ' + kindClass(kind);
-        group.style.setProperty('--kind-color', kindColors[kind] || '#68737f');
-        const title = document.createElement('div');
-        title.className = 'group-title';
-        addText(title, 'div', kindLabel(kind), 'group-name');
-        addText(title, 'div', bucket.length + ' visible', 'group-count');
-        group.appendChild(title);
+      const title = document.createElement('div');
+      title.className = 'detail-section ' + kindClass(row.kind);
+      title.style.setProperty('--kind-color', kindColors[row.kind] || '#68737f');
+      addText(title, 'div', row.statement, 'detail-statement');
+      const chips = document.createElement('div');
+      chips.className = 'labels';
+      addText(chips, 'span', kindLabel(row.kind), 'kind-pill');
+      addText(chips, 'span', row.sensitivity, 'sensitivity ' + row.sensitivity);
+      addText(chips, 'span', row.status || 'consolidated', 'label-chip');
+      title.appendChild(chips);
+      detailBodyEl.appendChild(title);
 
-        for (const row of bucket) {
-          const memory = document.createElement('article');
-          memory.id = row.claim_id;
-          memory.className = 'memory';
-          addText(memory, 'div', row.sensitivity, 'sensitivity ' + row.sensitivity);
-          addText(memory, 'div', row.statement, 'statement');
-          group.appendChild(memory);
-        }
-        groupsEl.appendChild(group);
+      const meta = document.createElement('div');
+      meta.className = 'meta-grid';
+      meta.appendChild(detailMeta('Claim', row.claim_id));
+      meta.appendChild(detailMeta('Evidence Events', String(row.evidenceCount ?? 0)));
+      meta.appendChild(detailMeta('Valid from', formatDate(row.validFrom)));
+      meta.appendChild(detailMeta('Valid until', formatDate(row.validUntil)));
+      detailBodyEl.appendChild(meta);
+
+      const scope = document.createElement('div');
+      scope.className = 'detail-section';
+      addText(scope, 'div', 'Scope labels', 'detail-label');
+      const labels = document.createElement('div');
+      labels.className = 'labels';
+      for (const labelId of row.labelIds || []) addText(labels, 'span', labelId, 'label-chip');
+      if (!row.labelIds || row.labelIds.length === 0) addText(labels, 'span', 'No labels', 'label-chip');
+      scope.appendChild(labels);
+      detailBodyEl.appendChild(scope);
+
+      const relations = document.createElement('div');
+      relations.className = 'detail-section';
+      addText(relations, 'div', 'Claim links', 'detail-label');
+      const list = document.createElement('div');
+      list.className = 'relationship-list';
+      const supersedes = row.supersedes || [];
+      if (supersedes.length === 0) {
+        addText(list, 'div', 'No supersedes link. This Claim does not replace an older Claim.', 'relationship');
+      } else {
+        for (const claimId of supersedes) addText(list, 'div', 'Supersedes ' + claimId, 'relationship');
       }
+      relations.appendChild(list);
+      detailBodyEl.appendChild(relations);
+    }
+
+    function renderRows(rows) {
+      rowsEl.replaceChildren();
+      if (currentRows.length === 0) {
+        addText(rowsEl, 'div', 'No consolidated Claims in this scope passed the Gate.', 'empty');
+        renderDetail([]);
+        return;
+      }
+      if (rows.length === 0) {
+        addText(rowsEl, 'div', 'No visible Claims match the current filters.', 'empty');
+        renderDetail([]);
+        return;
+      }
+
+      if (!rows.some((row) => row.claim_id === selectedClaimId)) selectedClaimId = rows[0].claim_id;
+
+      for (const row of rows) {
+        const memory = document.createElement('button');
+        memory.type = 'button';
+        memory.id = row.claim_id;
+        memory.className = 'memory ' + kindClass(row.kind);
+        memory.style.setProperty('--kind-color', kindColors[row.kind] || '#68737f');
+        memory.setAttribute('aria-selected', String(row.claim_id === selectedClaimId));
+        addText(memory, 'div', kindLabel(row.kind), 'kind-pill');
+        const body = document.createElement('div');
+        addText(body, 'div', row.statement, 'statement');
+        if (row.labelIds && row.labelIds.length > 0) {
+          const labels = document.createElement('div');
+          labels.className = 'labels';
+          for (const labelId of row.labelIds.slice(0, 5)) {
+            addText(labels, 'span', labelId, 'label-chip');
+          }
+          if (row.labelIds.length > 5) addText(labels, 'span', '+' + (row.labelIds.length - 5), 'label-chip');
+          body.appendChild(labels);
+        }
+        memory.appendChild(body);
+        addText(memory, 'div', row.sensitivity, 'sensitivity ' + row.sensitivity);
+        memory.addEventListener('click', () => {
+          selectedClaimId = row.claim_id;
+          render();
+        });
+        rowsEl.appendChild(memory);
+      }
+      renderDetail(rows);
+    }
+
+    function render() {
+      const selected = scopes.find((scope) => scope.project_id === select.value);
+      const filteredRows = filterRows(currentRows);
+      const groups = sortedGroups(currentRows);
+      renderKindTabs(currentRows);
+      renderSummary(groups, currentRows.length, filteredRows.length, selected);
+      renderRows(filteredRows);
+      const filters = [];
+      if (activeKind !== 'all') filters.push(kindLabel(activeKind));
+      if (sensitivitySelect.value !== 'all') filters.push(sensitivitySelect.value);
+      if (searchInput.value.trim()) filters.push('search');
+      statusEl.textContent =
+        filteredRows.length + ' shown / ' + currentRows.length + ' gated Claims' + (filters.length ? ' · ' + filters.join(' · ') : '');
     }
 
     function clearSurface(message) {
-      ringEl.replaceChildren();
+      currentRows = [];
+      kindTabsEl.replaceChildren();
       kindListEl.replaceChildren();
-      groupsEl.replaceChildren();
+      rowsEl.replaceChildren();
+      detailBodyEl.replaceChildren();
       visibleCountEl.textContent = '0';
-      visibleLabelEl.textContent = 'visible memories';
+      filteredCountEl.textContent = '0';
+      scopeNameEl.textContent = 'No scope selected.';
       statusEl.textContent = message || '';
     }
 
@@ -646,8 +908,12 @@ const HTML = `<!doctype html>
       const params = new URLSearchParams({ scope: selected.name, project: selected.project_id });
       const response = await fetch('/api/memories?' + params.toString());
       if (!response.ok) throw new Error('Failed to load memories');
-      const rows = await response.json();
-      renderRows(rows, selected);
+      currentRows = await response.json();
+      activeKind = 'all';
+      selectedClaimId = currentRows[0]?.claim_id || null;
+      searchInput.value = '';
+      sensitivitySelect.value = 'all';
+      render();
     }
 
     async function loadScopes() {
@@ -677,6 +943,15 @@ const HTML = `<!doctype html>
 
     select.addEventListener('change', () => {
       loadMemories().catch((error) => clearSurface(error.message));
+    });
+    searchInput.addEventListener('input', render);
+    sensitivitySelect.addEventListener('change', render);
+    clearButton.addEventListener('click', () => {
+      searchInput.value = '';
+      sensitivitySelect.value = 'all';
+      activeKind = 'all';
+      render();
+      searchInput.focus();
     });
 
     loadScopes().catch((error) => {
