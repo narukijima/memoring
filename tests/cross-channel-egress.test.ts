@@ -6,18 +6,21 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildContext } from '@retrieval/context-pack';
+import { buildContext, toScopedClaim } from '@retrieval/context-pack';
+import { proposeNeighbors } from '@retrieval/associate';
 import { searchRealm } from '@retrieval/search';
 import { handleMcpRequest } from '@retrieval/mcp';
 import { abstractEvents } from '@claim/extractor';
+import { getRecallCount } from '@claim/recall';
+import { forgetClaim } from '@security/redaction';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { eventIdentity, sessionIdentity, sourceIdentity } from '@intake/identity';
 import { runSecretScan } from '@security/secret-scan';
 import type { AbstractCandidate, AbstractInput, MemoryProvider } from '@claim/provider';
-import type { ClassificationState } from '@core/schema/enums';
-import type { MemEvent } from '@core/schema/entities';
+import type { ClassificationState, Sensitivity } from '@core/schema/enums';
+import type { Claim, MemEvent } from '@core/schema/entities';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
 
 const SECRET = 'sk-abc1234567890';
@@ -51,6 +54,77 @@ function contextDoc(seeded: SeededRealm, scope?: string): string {
   const r = buildContext(seeded.realm.ctx, { cwd, outPath: path.join('.memoring', 'context.md'), scope, audience: 'ai_tool', aperture: 'standard' });
   const file = path.join(cwd, '.memoring', 'context.md');
   return r.kind === 'written' && fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+}
+
+function putScopedClaim(
+  seeded: SeededRealm,
+  base: Claim,
+  statement: string,
+  labelIds: string[],
+  sensitivity: Sensitivity = 'internal',
+): Claim {
+  const ctx = seeded.realm.ctx;
+  const eventId = newId('event');
+  const event: MemEvent = {
+    event_id: eventId,
+    event_identity: `evt_assoc_${eventId}`,
+    realm_id: ctx.realmId,
+    occurrence_ids: [newId('occurrence')],
+    session_id: 'ses_assoc',
+    turn_id: null,
+    event_type: 'message',
+    role: 'user',
+    origin: 'user',
+    created_at: '2026-01-01T00:00:00.000Z',
+    source_timestamp: null,
+    timestamp_confidence: 'capture_observed',
+    sequence: 20_000,
+    text_ref: null,
+    source_extra_ref: null,
+    sensitivity,
+    sensitivity_classification_state: 'inferred',
+    context_injected: false,
+    context_pack_digest: null,
+    parser_version: 'test.v1',
+    status: 'active',
+    schema_version: SCHEMA_VERSION.event,
+  };
+  ctx.store.putEvent(event);
+  ctx.store.putAssignment({
+    assignment_id: newId('assignment'),
+    realm_id: ctx.realmId,
+    target_type: 'event',
+    target_id: event.event_id,
+    label_ids: labelIds,
+    project_ids: ['proj_assoc'],
+    classification_state: 'inferred',
+    assigned_by: 'rule:path_git_remote',
+    confidence: 0.9,
+    evidence: event.occurrence_ids,
+    created_by_derivation_id: null,
+    created_at: '2026-01-01T00:00:00.000Z',
+    schema_version: SCHEMA_VERSION.assignment,
+  });
+
+  const claim: Claim = {
+    ...base,
+    claim_id: newId('claim'),
+    kind: 'fact',
+    statement_ref: ctx.objects.put(`${newId('claim')}_stmt`, Buffer.from(statement, 'utf8')).ref,
+    status: 'consolidated',
+    conflict_reason: null,
+    evidence_event_identities: [event.event_identity],
+    evidence_occurrence_ids: event.occurrence_ids,
+    evidence_count: 1,
+    last_recalled_at: null,
+    valid_from: '2026-01-01T00:00:00.000Z',
+    valid_until: null,
+    supersedes: [],
+    sensitivity,
+    sensitivity_classification_state: 'inferred',
+  };
+  ctx.store.putClaim(claim);
+  return claim;
 }
 
 function remoteTestEvent(seeded: SeededRealm, text: string, scopeState?: ClassificationState): MemEvent {
@@ -160,5 +234,53 @@ describe('cross-channel egress parity (G3/G4/G5 across context.md + search + MCP
     expect(searchRealm(ctx, 'better-sqlite3', { activeLabelIds: wrongLabels })).toHaveLength(0);
     // 3. MCP with a non-existent scope returns no matches.
     expect(mcpSearch(seeded, 'better-sqlite3', 'no-such-scope-label')).toContain('No matches.');
+  });
+
+  it('blocks a secret/out-of-scope neighbor reached by a supersede association edge', () => {
+    const ctx = seeded.realm.ctx;
+    const activeLabels = resolveActiveLabelIds(ctx, ['proj_test'], undefined);
+    const seed = ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')[0]!;
+    const unsafe = putScopedClaim(
+      seeded,
+      seed,
+      `Association traversal must not leak ${SECRET}`,
+      ['lbl_outside_association'],
+      'secret',
+    );
+    ctx.store.putClaim({ ...seed, supersedes: [unsafe.claim_id] });
+
+    const proposals = proposeNeighbors(ctx, [toScopedClaim(ctx, ctx.store.getClaim(seed.claim_id)!)], {
+      audience: 'ai_tool',
+      aperture: 'standard',
+      activeLabelIds: activeLabels,
+      crossScopeAllowed: false,
+    });
+
+    expect(proposals.map((p) => p.claim.claim_id)).not.toContain(unsafe.claim_id);
+    expect(contextDoc(seeded)).not.toContain(SECRET);
+    expect(getRecallCount(ctx, unsafe.claim_id)).toBe(0);
+  });
+
+  it('makes a supersede association edge inert when either endpoint is forgotten', () => {
+    const ctx = seeded.realm.ctx;
+    const activeLabels = resolveActiveLabelIds(ctx, ['proj_test'], undefined);
+    const seed = ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')[0]!;
+    const neighbor = putScopedClaim(seeded, seed, 'Association neighbor should not revive after forget', activeLabels);
+    ctx.store.putClaim({ ...seed, supersedes: [neighbor.claim_id] });
+    const req = {
+      audience: 'ai_tool' as const,
+      aperture: 'standard' as const,
+      activeLabelIds: activeLabels,
+      crossScopeAllowed: false,
+    };
+
+    expect(proposeNeighbors(ctx, [toScopedClaim(ctx, ctx.store.getClaim(seed.claim_id)!)], req)).toHaveLength(1);
+
+    forgetClaim(ctx, neighbor.claim_id, { seal: true });
+
+    expect(proposeNeighbors(ctx, [toScopedClaim(ctx, ctx.store.getClaim(seed.claim_id)!)], req)).toHaveLength(0);
+    expect(contextDoc(seeded)).not.toContain('Association neighbor should not revive after forget');
+    const latestPack = ctx.store.listContextPacks(ctx.realmId).at(-1);
+    expect(latestPack?.evidence_ids).not.toContain(neighbor.claim_id);
   });
 });

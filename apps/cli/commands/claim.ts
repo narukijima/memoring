@@ -3,13 +3,16 @@
 // lowering sensitivity (no AI Declassify, G9); expire supersedes (drops from
 // active recall).
 import { replicaLayout } from '@core/paths';
+import { normalizeLabel } from '@core/label-normalize';
 import { openActiveRealm, type RealmContext } from '@core/runtime';
+import { newId } from '@core/schema/ids';
 import { reinforcement } from '@claim/lifecycle';
 import { claimKeyMeta, readClaimStatement } from '@claim/extractor';
 import { indexClaim } from '@retrieval/search';
 import { scanText } from '@security/secret-scan';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import type { Claim } from '@core/schema/entities';
 
 export async function cmdClaim(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
@@ -67,23 +70,51 @@ function correct(ctx: RealmContext, id?: string, text?: string): number {
   const c = ctx.store.getClaim(id);
   if (!c) return notFound(id);
   const oldStatement = readClaimStatement(ctx, c);
-  // Replace the statement; sensitivity is preserved (correction never declassifies).
   const ref = ctx.objects.put(`${c.claim_id}_stmt_corr`, Buffer.from(text, 'utf8')).ref;
   const secretDetected = scanText(text).detected;
-  const updated = {
-    ...c,
-    statement_ref: ref,
-    sensitivity: secretDetected ? 'secret' : c.sensitivity,
-    sensitivity_classification_state: secretDetected ? 'inferred' : c.sensitivity_classification_state,
-  };
-  ctx.store.putClaim(updated);
-  // Re-key the dedup map: drop the OLD statement's key (else the old text would
-  // re-merge into this claim and could never be re-learned) and add the new one.
+  const sensitivity = secretDetected ? 'secret' : c.sensitivity;
+  const sensitivityState = secretDetected ? 'inferred' : c.sensitivity_classification_state;
+
   ctx.store.deleteMeta(claimKeyMeta(ctx.realmKey, c.kind, oldStatement, c.project_ids));
-  ctx.store.setMeta(claimKeyMeta(ctx.realmKey, c.kind, text, c.project_ids), c.claim_id);
-  if (secretDetected) ctx.store.indexDelete(c.claim_id);
-  else if (updated.status === 'consolidated') indexClaim(ctx, updated);
-  console.log(secretDetected ? `  Corrected ${id} (secret detected; output suppressed).` : `  Corrected ${id}.`);
+  if (normalizeLabel(oldStatement) === normalizeLabel(text)) {
+    const updated: Claim = {
+      ...c,
+      statement_ref: ref,
+      sensitivity,
+      sensitivity_classification_state: sensitivityState,
+    };
+    ctx.store.putClaim(updated);
+    ctx.store.setMeta(claimKeyMeta(ctx.realmKey, c.kind, text, c.project_ids), c.claim_id);
+    if (secretDetected) ctx.store.indexDelete(c.claim_id);
+    else if (updated.status === 'consolidated') indexClaim(ctx, updated);
+    console.log(secretDetected ? `  Corrected ${id} (secret detected; output suppressed).` : `  Corrected ${id}.`);
+    return 0;
+  }
+
+  const nowIso = new Date().toISOString();
+  const replacement: Claim = {
+    ...c,
+    claim_id: newId('claim'),
+    statement_ref: ref,
+    created_by: 'user',
+    created_at: nowIso,
+    last_recalled_at: null,
+    valid_from: nowIso,
+    valid_until: null,
+    supersedes: [c.claim_id],
+    sensitivity,
+    sensitivity_classification_state: sensitivityState,
+  };
+  ctx.store.putClaim({ ...c, status: 'superseded', valid_until: nowIso });
+  ctx.store.putClaim(replacement);
+  ctx.store.setMeta(claimKeyMeta(ctx.realmKey, c.kind, text, c.project_ids), replacement.claim_id);
+  ctx.store.indexDelete(c.claim_id);
+  if (!secretDetected && replacement.status === 'consolidated') indexClaim(ctx, replacement);
+  console.log(
+    secretDetected
+      ? `  Corrected ${id} -> ${replacement.claim_id} (secret detected; output suppressed).`
+      : `  Corrected ${id} -> ${replacement.claim_id}.`,
+  );
   return 0;
 }
 

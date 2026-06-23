@@ -187,6 +187,7 @@ export async function abstractEvents(
         continue;
       }
       if (existingId && !existingLive) ctx.store.deleteMeta(metaKey);
+      const supersedes = existing && existing.status === 'superseded' ? [existing.claim_id] : [];
 
       const derivation = recordDerivation(ctx, provider, event, now);
       const statementRef = ctx.objects.put(
@@ -217,7 +218,7 @@ export async function abstractEvents(
         last_recalled_at: null,
         valid_from: event.source_timestamp ?? event.created_at,
         valid_until: null,
-        supersedes: [],
+        supersedes,
         evidence_count: 1,
         reinforcement_score: 0,
         confidence: cand.confidence,

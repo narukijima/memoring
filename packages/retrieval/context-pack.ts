@@ -14,9 +14,11 @@ import { TOKEN_BUDGET_RECIPE, type ContextPurpose } from '@core/recipe';
 import { estimateTokens } from '@core/token-estimate';
 import { log } from '@core/log';
 import { readClaimStatement } from '@claim/extractor';
+import { recordRecall } from '@claim/recall';
 import { isClaimSuppressed } from '@claim/seal';
 import { validateClaim } from '@claim/validator';
 import { resolveActiveLabelIds } from './active-scope';
+import { proposeNeighbors } from './associate';
 import type { Aperture, Audience, ClassificationState } from '@core/schema/enums';
 import type { Claim, ContextPack, MemEvent } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
@@ -65,11 +67,12 @@ export type BuildResult =
       dropped: number;
     };
 
-interface ScopedClaim {
+export interface ScopedClaim {
   claim: Claim;
   statement: string;
   labelIds: string[];
   scopeState: ClassificationState | null;
+  associated?: boolean;
   /** Set when the claim is surfaced as a stale warning (§3.2 section 9), not as
    *  current guidance: 'superseded' (replaced via `claim expire`) or 'expired'
    *  (past valid_until at build time). */
@@ -77,7 +80,7 @@ interface ScopedClaim {
 }
 
 /** Derive a claim's scope from the assignments of its evidence events. */
-function claimScope(ctx: RealmContext, claim: Claim): { labelIds: string[]; scopeState: ClassificationState | null } {
+export function claimScope(ctx: RealmContext, claim: Claim): { labelIds: string[]; scopeState: ClassificationState | null } {
   const labelIds = new Set<string>();
   const states: ClassificationState[] = [];
   for (const eid of claim.evidence_event_identities) {
@@ -91,7 +94,12 @@ function claimScope(ctx: RealmContext, claim: Claim): { labelIds: string[]; scop
   return { labelIds: [...labelIds], scopeState: bestClassificationState(states) };
 }
 
-function toGateItem(ctx: RealmContext, sc: ScopedClaim): GateItem {
+export function toScopedClaim(ctx: RealmContext, claim: Claim): ScopedClaim {
+  const sc = claimScope(ctx, claim);
+  return { claim, statement: readClaimStatement(ctx, claim), labelIds: sc.labelIds, scopeState: sc.scopeState };
+}
+
+export function toGateItem(ctx: RealmContext, sc: ScopedClaim): GateItem {
   const c = sc.claim;
   return {
     kind: 'claim',
@@ -148,18 +156,13 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   //    condition — i.e. only not_conflicted_for_request is allowed to fail
   //    (§3.4). A conflicted claim that is also secret / out-of-scope /
   //    unclassified / unsafe is still fully dropped.
-  const toScoped = (claim: Claim): ScopedClaim => {
-    const sc = claimScope(ctx, claim);
-    return { claim, statement: readClaimStatement(ctx, claim), labelIds: sc.labelIds, scopeState: sc.scopeState };
-  };
-
   const nowIso = now.toISOString();
   const passed: ScopedClaim[] = [];
   const conflictsOpen: ScopedClaim[] = [];
   const staleOpen: ScopedClaim[] = [];
   let dropped = 0;
   for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')) {
-    const sc = toScoped(claim);
+    const sc = toScopedClaim(ctx, claim);
     if (!claimBridgeContained(sc, activeLabelIds)) {
       dropped += 1;
       continue;
@@ -177,7 +180,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   // new session should know the OLD policy was replaced — surface in-scope/safe ones
   // as stale warnings (the Gate still hides secret / out-of-scope superseded claims).
   for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'superseded')) {
-    const sc = toScoped(claim);
+    const sc = toScopedClaim(ctx, claim);
     if (claimBridgeContained(sc, activeLabelIds) && gate(toGateItem(ctx, sc), req).pass)
       staleOpen.push({ ...sc, staleReason: 'superseded' });
     else dropped += 1;
@@ -189,7 +192,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
       dropped += 1;
       continue;
     }
-    const sc = toScoped(claim);
+    const sc = toScopedClaim(ctx, claim);
     if (!claimBridgeContained(sc, activeLabelIds)) {
       dropped += 1;
       continue;
@@ -202,8 +205,30 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     }
   }
 
+  for (const sc of proposeNeighbors(ctx, [...passed, ...conflictsOpen, ...staleOpen], req)) {
+    const associated: ScopedClaim = { ...sc, associated: true };
+    if (associated.claim.status === 'superseded') {
+      staleOpen.push({ ...associated, staleReason: 'superseded' });
+    } else if (associated.claim.valid_until && associated.claim.valid_until < nowIso) {
+      staleOpen.push({ ...associated, staleReason: 'expired' });
+    } else {
+      passed.push(associated);
+    }
+  }
+
+  recordRecall(
+    ctx,
+    [...passed, ...conflictsOpen, ...staleOpen].map((sc) => sc.claim.claim_id),
+    now,
+  );
+  refreshClaims(ctx, passed);
+  refreshClaims(ctx, conflictsOpen);
+  refreshClaims(ctx, staleOpen);
+
   // 3. Ranking (after the Gate): reinforcement desc, then recency.
   passed.sort((a, b) => {
+    const associationTier = Number(a.associated === true) - Number(b.associated === true);
+    if (associationTier !== 0) return associationTier;
     const r = b.claim.reinforcement_score - a.claim.reinforcement_score;
     if (r !== 0) return r;
     return b.claim.valid_from.localeCompare(a.claim.valid_from);
@@ -277,6 +302,14 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
 
   ctx.audit('context_pack_generate', { pack_id: packId, emitted: passed.length, dropped, audience, aperture }, now);
   return { kind: 'written', outPath: opts.outPath, packId, emitted: passed.length, dropped };
+}
+
+function refreshClaims(ctx: RealmContext, scoped: ScopedClaim[]): void {
+  for (let i = 0; i < scoped.length; i += 1) {
+    const current = scoped[i]!;
+    const claim = ctx.store.getClaim(current.claim.claim_id);
+    if (claim) scoped[i] = { ...current, claim };
+  }
 }
 
 // Budget-group keys for the non-KIND sections (conflicts / stale warnings). Every
