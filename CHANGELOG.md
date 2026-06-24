@@ -24,7 +24,8 @@ built against it — are recorded here.
   reprocess-invariant content anchors). `memoring import --print-prompt <provider>` hands back the
   export prompt to run elsewhere.
 - **Floor preserved.** No new origin, Claim state, Gate, or egress channel; imports target the active
-  Realm via the ADR-0006 resolution; secret-scan runs on every imported entry. Implements the
+  Realm via the ADR-0006 resolution; secret-scan runs on every imported entry (both the statement
+  and its backing `根拠` quote, so a secret hidden only in the quote suppresses the candidate). Implements the
   ChatGPT/Claude/Gemini-export connector parked in [ADR-0004 §7](docs/adr/0004-v0_1-candidates.md).
 
 ## Unreleased — version reporting

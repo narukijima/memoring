@@ -184,9 +184,11 @@ result back. This is a pure local string print — no egress.
    events are `NON_EVIDENCE_ORIGINS`. Both routes to authority are closed at the
    validator/origin layer, independently.
 2. **No laundering loophole.** A pasted AI summary lands as `host_memory`:
-   never independent evidence, never abstracted, never auto-consolidated. The
-   existing `tests/recall-eval.test.ts` scenario 6 invariant
-   (`allEvidenceIndependent`) is extended to cover imported content.
+   never independent evidence, never abstracted, never auto-consolidated. This is
+   the same `allEvidenceIndependent` invariant guarded by `tests/recall-eval.test.ts`
+   scenario 6 for `host_summary`; the imported-content equivalent (a `host_memory`
+   event can never back a consolidated claim, even after a full loop/reprocess) is
+   covered by the dedicated `tests/import-from-ai.test.ts` suite.
 3. **Gate stays the sole egress mechanism.** Imported events run
    classify → secret-scan → Gate like everything else; `unknown`/`secret` are
    excluded; candidate Claims are not indexed. No new egress channel is added.
