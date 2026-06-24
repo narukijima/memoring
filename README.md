@@ -33,8 +33,21 @@ Requires **Node.js 20 or 22 (LTS)**. Node 24 works too; the newest releases (e.g
 to compile the native `better-sqlite3` dependency. If `npm install` errors while building
 better-sqlite3, switch to Node 22 LTS (`nvm install 22 && nvm use 22`) and reinstall.
 
-Run the `npm` setup steps from the cloned repository directory. After `npm link`, the `memoring`
-command works from anywhere.
+**npm (planned for v1).** A published package will eventually make installation a one-liner
+([ADR-0008](docs/adr/0008-cli-upgrade-path.md) · [ADR-0009](docs/adr/0009-distribution-install-ux.md)):
+
+```bash
+npm install -g memoring          # not available yet — install from source (below) for now
+```
+
+This is **not functional yet** — and not only because the package is unpublished. Source-only
+distribution via `tsx` does not survive a global install: `tsx` skips tsconfig path-alias
+(`@core/*`) resolution for files under `node_modules/`, so the published package cannot resolve its
+own imports. Unblocking the npm path is gated on that fix (a build/bundle step, or the deferred
+native-dependency / storage-engine decision). Until then, install from source.
+
+**From source (the supported path today).** Run the `npm` setup steps from the cloned repository
+directory. After `npm link`, the `memoring` command works from anywhere.
 
 ```bash
 git clone https://github.com/narukijima/memoring.git
