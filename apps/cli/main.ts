@@ -6,6 +6,7 @@ import { cmdBackfill } from './commands/backfill';
 import { cmdContextBuild } from './commands/context';
 import { cmdDoctor } from './commands/doctor';
 import { cmdSearch } from './commands/search';
+import { cmdAsk } from './commands/ask';
 import { cmdIndex } from './commands/reindex';
 import { cmdForget, cmdDelete, cmdRedact, cmdSuppress } from './commands/forget';
 import { cmdClaim } from './commands/claim';
@@ -56,6 +57,9 @@ Usage:
       --scope <label> | --project <id>   Active scope (else resolved from CWD; Silence if ambiguous).
       --realm <id>                       Select Active Realm.
   memoring search <query> [--scope <l>]  Exact / FTS / n-gram search (classified, non-secret, in-scope).
+  memoring ask <question> [--scope <l>]  Grounded natural-language answer over gated memory (output-layer
+                                          LLM; downstream of the Gate, read-only). Local model by default;
+                                          remote stays opt-in. Silence on no grounded match (ADR-0011).
   memoring index rebuild                 Rebuild the search index from lower layers.
   memoring claim list|pin|correct|expire Reactive Claim governance.
   memoring label list|merge|rename       Label (vocabulary) governance.
@@ -109,6 +113,8 @@ async function main(): Promise<number> {
       return cmdContextBuild(rest); // `build` arrives as a positional and is ignored
     case 'search':
       return cmdSearch(rest);
+    case 'ask':
+      return cmdAsk(rest);
     case 'index':
       return cmdIndex(rest);
     case 'forget':
