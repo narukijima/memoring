@@ -1,8 +1,9 @@
 # ADR 0004 — v0.1 candidates carved out of the frozen v0 scope
 
-- Status: Proposed (deferred; none implemented in v0)
+- Status: Proposed (deferred; one slice since implemented — the foreign-AI
+  manual-import connector of #7 shipped via ADR-0007. The rest remain deferred.)
 - Date: 2026-06-22
-- Scope: roadmap boundary. Records six features that are explicitly **out of v0**
+- Scope: roadmap boundary. Records seven features that are explicitly **out of v0**
   and the v0 invariant each must not cross when it is eventually built.
 - Relates to: OUT-013..016 (Requirements §5), Specification §4 (MCP), §6.2/§7.3
   (export / egress), Final Design §6 (Realm, Replica, Storage), §16 (blocking gate).
@@ -18,11 +19,15 @@ the Gate, or (c) let AI-generated or off-device content re-enter as authority.
 Several capabilities are attractive and were repeatedly raised, but each one, done
 naively, breaks a v0 invariant. This ADR parks them as **v0.1 candidates** and,
 for each, states the boundary it must respect so a later implementer does not
-quietly relax the safety core. None of these are implemented now.
+quietly relax the safety core. With the exception of the foreign-AI manual-import
+connector (#7), which has since shipped under its own ADR-0007, none of these are
+implemented now.
 
 ## Decision
 
-Defer all six. Each is admissible in v0.1+ **only** behind its own ADR that shows
+Defer all seven (the foreign-AI manual-import slice of #7 has since shipped via
+ADR-0007; the rest stand). Each is admissible in v0.1+ **only** behind its own ADR
+that shows
 it does not cross the stated boundary. The general rule that dominates all of
 them: *the Gate stays the sole safety mechanism, it runs before ranking, and no
 off-device plaintext or AI-authored content gains evidence authority.*
@@ -109,14 +114,20 @@ off-device plaintext or AI-authored content gains evidence authority.*
 ### 7. Connector expansion (Codex, manual-import dir, generic JSONL, Markdown transcript)
 
 - **What.** Additional source Connectors beyond Claude Code.
-- **Why deferred (and a v0 scope correction).** v0 ships exactly ONE connector —
-  Claude Code (`packages/integrations/claude-code`, registered in
-  `packages/intake/registry.ts`). The earlier requirements/design prose listing four
-  connectors as v0 overstated scope; this ADR records the correction: the other four
-  are v0.1. The Connector interface (`packages/intake/types.ts`) is stable and the
-  registry extends cleanly, so this is additive, not a redesign. Building speculative
-  parsers (especially Codex, whose transcript format would be guessed at) violates
-  YAGNI and risks the G2 quarantine contract.
+- **Status update.** The **manual-import** slice has since shipped via **ADR-0007**:
+  `memoring import` ingests a pasted ChatGPT/Claude/Gemini "everything you know about
+  me" export through the same pipeline, landing each entry as a non-authoritative
+  `host_memory` Event plus a review `candidate` (no evidence authority until the user
+  promotes it). **Codex, generic JSONL, and Markdown-transcript** connectors remain
+  deferred.
+- **Why the rest stay deferred (and a v0 scope correction).** v0 shipped exactly ONE
+  source-watching connector — Claude Code (`packages/integrations/claude-code`,
+  registered in `packages/intake/registry.ts`). The earlier requirements/design prose
+  listing four connectors as v0 overstated scope; this ADR records the correction: the
+  others are v0.1. The Connector interface (`packages/intake/types.ts`) is stable and
+  the registry extends cleanly, so this is additive, not a redesign. Building
+  speculative parsers (especially Codex, whose transcript format would be guessed at)
+  violates YAGNI and risks the G2 quarantine contract.
 - **Boundary it must not cross.** Every new connector flows through the SAME pipeline:
   capture-raw-first (G1), parse → Event OR Quarantine with no raw loss on
   failure/unknown-format/unsupported-version (G2), realm_key-derived event_identity

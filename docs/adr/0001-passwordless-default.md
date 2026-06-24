@@ -64,14 +64,18 @@ encryption (FileVault) or `--passphrase`.
   Backward-compatible for *opening*: a replica created with `--passphrase` (only
   `keybundle.json` present) still opens via the passphrase path, so there is no
   destructive migration and no breaking change for existing users.
-- Derivation is unchanged (DEK + `HKDF` realm_key), so a future
-  `memoring key enable-passphrase` can wrap an existing passwordless vault's DEK
-  without rebuilding it.
+- Derivation is unchanged (DEK + `HKDF` realm_key), so an existing passwordless
+  vault's DEK can be wrapped under a passphrase without rebuilding it. This
+  in-place upgrade now ships as `memoring rekey --passphrase` (and the inverse
+  passphrase rotation as `memoring rekey` on a passphrase vault): both re-wrap the
+  DEK and preserve all memory, identities, and Seals (NFR-014).
 
 ## Deferred (explicitly not in this change)
 
-- `memoring key enable-passphrase` (convert an existing vault in place).
-- `export/import --bundle` and an `--encrypted` (age/passphrase) backup.
+- A standalone reverse (passphrase → passwordless) downgrade. The forward upgrade
+  and passphrase rotation ship via `memoring rekey`; the downgrade is not exposed.
+- `export/import --bundle` and an `--encrypted` (age/passphrase) backup as a
+  separately encrypted, self-contained archive format.
 - OS keychain / Secure Enclave wrapping of `key.json` (revisit per-platform:
   macOS Keychain, Linux Secret Service, Windows DPAPI).
 - Device pairing, multi-device sync, daemon-/UI-premised auth.

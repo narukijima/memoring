@@ -18,7 +18,10 @@ npm install        # compiles the native better-sqlite3 dependency
 npm link           # puts a global `memoring` on PATH
 ```
 
-`package.json` is `private: true`, so Memoring is **not published to npm**; cloning is the only path.
+`package.json` already carries publish metadata (`publishConfig.access: public`, a `files` allowlist,
+the `memoring` `bin`) and no longer sets `private`, but Memoring is **not yet published to npm** — and
+even once published it would not install cleanly today, because `tsx` skips `@core/*` path-alias
+resolution for files under `node_modules/` (see README). So cloning is still the only working path.
 There is no build step (the CLI runs TypeScript via `tsx`), and no Docker image, single-file binary,
 or Homebrew formula.
 
@@ -33,8 +36,9 @@ gap is precisely why Memoring cannot offer a one-line quickstart today.
 
 The goal is quickstart parity (a one-liner install plus a trivial upgrade) **without** eroding the
 local-first / sovereign / no-egress-by-default posture and **without** touching a frozen invariant.
-ADR-0008 already decided the *upgrade* mechanics and the first distribution rung (flip
-`private` → `false` and `npm publish` at v1; an opt-in, no-telemetry update-notifier deferred). This
+ADR-0008 already decided the *upgrade* mechanics and the first distribution rung (the publish
+metadata is in place; the actual `npm publish` is v1 work, once the `tsx` alias-resolution blocker is
+fixed; an opt-in, no-telemetry update-notifier deferred). This
 ADR places that into a full roadmap and names the one prerequisite that gates the rest.
 
 ## Decision
@@ -47,7 +51,7 @@ met** — do not build ahead of need (YAGNI).
 | Phase | Channel | Install / upgrade | Prerequisite | Peer parity |
 | --- | --- | --- | --- | --- |
 | **0 — now** | from source | `git clone` → `npm install` → `npm link`; upgrade = `git pull` (ADR-0008) | none (current state) | — |
-| **1 — at v1** | npm | `npm install -g memoring`; upgrade `npm i -g memoring@latest` / `npm update -g memoring` | flip `private`→`false` + `npm publish` (ADR-0008) | Codex (npm) |
+| **1 — at v1** | npm | `npm install -g memoring`; upgrade `npm i -g memoring@latest` / `npm update -g memoring` | `npm publish` (publish metadata already in place) + `tsx` alias-resolution fix (ADR-0008) | Codex (npm) |
 | **2** | Homebrew | `brew install …` | native-dependency strategy resolved (below) | Claude / Codex (brew) |
 | **3** | self-contained binary | `curl … \| sh` installer + single executable | a packaging mechanism that embeds the native binary | Claude (native install) |
 
