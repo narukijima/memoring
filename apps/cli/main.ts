@@ -7,6 +7,7 @@ import { cmdContextBuild } from './commands/context';
 import { cmdDoctor } from './commands/doctor';
 import { cmdSearch } from './commands/search';
 import { cmdAsk } from './commands/ask';
+import { cmdChat } from './commands/chat';
 import { cmdIndex } from './commands/reindex';
 import { cmdForget, cmdDelete, cmdRedact, cmdSuppress } from './commands/forget';
 import { cmdClaim } from './commands/claim';
@@ -60,6 +61,9 @@ Usage:
   memoring ask <question> [--scope <l>]  Grounded natural-language answer over gated memory (output-layer
                                           LLM; downstream of the Gate, read-only). Local model by default;
                                           remote stays opt-in. Silence on no grounded match (ADR-0011).
+  memoring chat [--scope <l>]            Multi-turn conversation with ONE Realm (output-layer LLM; same
+                                          guarantees as ask per turn — gated, grounded, read-only,
+                                          Ouroboros-marked). Reads questions from stdin; ':exit' to end.
   memoring index rebuild                 Rebuild the search index from lower layers.
   memoring claim list|pin|correct|expire Reactive Claim governance.
   memoring label list|merge|rename       Label (vocabulary) governance.
@@ -83,6 +87,10 @@ Environment:
   MEMORING_LLM_MODEL    Model id (e.g. deepseek-chat, gpt-4o-mini, qwen2.5:3b).
   MEMORING_LLM_API_KEY  API key for a remote endpoint (never persisted in config).
   MEMORING_LLM_EGRESS   Force local|remote (default: remote unless the URL is loopback).
+  MEMORING_ASK_BASE_URL Per-role override for the output-layer LLM (ask / chat): let the
+  MEMORING_ASK_MODEL    conversational renderer use a DIFFERENT model than the loop classifier.
+  MEMORING_ASK_API_KEY  Each falls back to the matching MEMORING_LLM_* when unset. The remote
+  MEMORING_ASK_EGRESS   opt-in stays MEMORING_LLM_REMOTE_OPT_IN (local default, remote opt-in).
   MEMORING_LLM_REMOTE_OPT_IN  Remote (off-device) AI is DEFAULT-OFF (§7.3). Set =1 to permit
                         sending raw history to a remote endpoint; otherwise Memoring falls back
                         to the on-device rule-based provider. A loopback (local) model needs no
@@ -115,6 +123,8 @@ async function main(): Promise<number> {
       return cmdSearch(rest);
     case 'ask':
       return cmdAsk(rest);
+    case 'chat':
+      return cmdChat(rest);
     case 'index':
       return cmdIndex(rest);
     case 'forget':

@@ -10,36 +10,19 @@ import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@cor
 import { resolveActiveProjects } from '@core/realm';
 import { searchRealm, type SearchResult } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
-import { renderMarkerBlock, signMarker } from '@security/ouroboros';
-import { hmacHex } from '@security/crypto-primitives';
-import { newId } from '@core/schema/ids';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 import { printActiveRealmSilence } from './resolve';
 import { resolveOutputProvider, type OutputProvider } from '../output-provider';
+import { GROUNDING_INSTRUCTION, renderExcerpts, renderRendererMarker } from '../output-render';
 
 // Identifies the renderer in the Ouroboros marker (the ask path has no token-budget
 // Recipe, unlike the ContextPack).
 const ASK_RENDERER_RECIPE = 'ask.v1';
-// The Gate constraints `searchRealm` enforces on every excerpt this renderer sees
-// (recorded in the marker's policy digest, mirroring the ContextPack path).
-const ASK_POLICY_APPLIED = ['active_scope_only', 'no_secret', 'no_unknown', 'no_confidential', 'classified_only'];
-
-// Strict-grounding instruction (ADR-0011 §4): phrase ONLY what retrieval released,
-// in the user's language, and refuse when the excerpts do not contain it. The
-// model's parametric knowledge is a phrasing aid, never a source of facts.
-const GROUNDING_INSTRUCTION = [
-  'You answer the question using ONLY the memory excerpts provided below.',
-  '- Use ONLY facts found in the excerpts. Never use outside or general knowledge as fact.',
-  '- If the excerpts do not contain the answer, say you cannot answer from the stored memory.',
-  '- Answer in the same language as the question.',
-  '- Be concise; do not invent details, sources, or citations.',
-].join('\n');
 
 /** Build the one-shot grounding prompt from the gated excerpts (one query, v1 §2). */
 export function buildAskPrompt(query: string, results: SearchResult[]): string {
-  const excerpts = results.map((r, i) => `[${i + 1}] (${r.ref_type}) ${r.snippet}`).join('\n');
-  return `${GROUNDING_INSTRUCTION}\n\nMemory excerpts:\n${excerpts}\n\nQuestion: ${query}`;
+  return `${GROUNDING_INSTRUCTION}\n\nMemory excerpts:\n${renderExcerpts(results)}\n\nQuestion: ${query}`;
 }
 
 export type AskOutcome = { grounded: false } | { grounded: true; answer: string };
@@ -61,20 +44,7 @@ export async function askRealm(
   const results = searchRealm(ctx, query, { activeLabelIds: opts.activeLabelIds });
   if (results.length === 0) return { grounded: false };
   const raw = await provider.generate(buildAskPrompt(query, results));
-  return { grounded: true, answer: `${raw.trim()}\n\n${askMarkerBlock(ctx, now)}` };
-}
-
-/** Sign + render the Ouroboros marker the same way the ContextPack path does, so the
- *  answer is recognizable as Memoring-generated (textLooksContextInjected) on any
- *  re-ingestion and can never count as evidence / reinforcement (ADR-0011 §5c). */
-function askMarkerBlock(ctx: RealmContext, now: Date): string {
-  const marker = signMarker(ctx.realmKey, {
-    context_pack_id: newId('contextPack', now.getTime()),
-    recipe_id: ASK_RENDERER_RECIPE,
-    policy_digest: hmacHex(ctx.realmKey, ASK_POLICY_APPLIED.join('|')),
-    generated_at: now.toISOString(),
-  });
-  return renderMarkerBlock(marker);
+  return { grounded: true, answer: `${raw.trim()}\n\n${renderRendererMarker(ctx, ASK_RENDERER_RECIPE, now)}` };
 }
 
 export async function cmdAsk(argv: string[]): Promise<number> {

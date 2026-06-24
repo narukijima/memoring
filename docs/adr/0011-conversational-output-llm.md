@@ -208,3 +208,31 @@ loop layer (`isLoopback` + the same `MEMORING_LLM_REMOTE_OPT_IN` gate) rather th
 default. The "remote-default-on would need a §7.3/§7.5/policy.v2 amendment" wording in §5 stands —
 that path is now declined, not taken. The remote disclosure is calibrated to this layer (gated,
 secret-free, in-scope excerpts leave, never raw history), and a local model is recommended.
+
+## Addendum — multi-turn `chat` + per-role provider config (2026-06-24)
+
+Recorded when the second implementation slice landed: the `memoring chat` multi-turn surface and the
+per-role provider-config split named as a prerequisite in §6. Both ship strictly within the model
+above; no frozen invariant moves.
+
+- **`memoring chat` (multi-turn, §2/§3/§4/§5).** A conversation bound to exactly ONE Realm. The
+  Realm + scope are resolved ONCE up front (fail-closed to Silence on ambiguity, like `search` /
+  `ask`), so cross-Realm recall is impossible by construction (§3). Each turn reuses the exact `ask`
+  guarantees turn-for-turn — gated retrieval via `searchRealm` (downstream of the Gate, never the
+  raw store), strict grounding (0 results → no answer, no model call: Silence extended to the
+  renderer, §4), answer-only-from-excerpts in the user's language, the signed `memoring:ouroboros`
+  marker on every answer (§5c), and READ-ONLY (no Events / Claims / candidates, §5d). Conversation
+  context is kept across turns for the model's phrasing only; every turn still performs its OWN
+  gated retrieval. The shared safety code (grounding instruction + marker) lives in one place
+  (`apps/cli/output-render.ts`) so `ask` and `chat` cannot drift.
+- **Per-role provider config (§6 prerequisite, partial).** The output role reads a dedicated
+  `MEMORING_ASK_BASE_URL` / `_MODEL` / `_API_KEY` / `_EGRESS` namespace, falling back per-variable to
+  the loop's `MEMORING_LLM_*` when unset, so the conversational renderer can use a different model
+  than the loop `MemoryProvider`. The `MemoryProvider` and `OutputProvider` interfaces are both
+  **unchanged** (the `generate` capability already added by the `ask` slice on `OutputProvider`,
+  separate from `MemoryProvider.abstract()`). The shared remote opt-in gate
+  (`MEMORING_LLM_REMOTE_OPT_IN`) and the local-default / remote-opt-in posture are untouched — this
+  split flips no egress default and seeks no §7.3 / §7.5 amendment.
+
+Still deferred (unchanged): agentic / multi-hop associative retrieval, the global cross-Realm
+"whole-self" twin, any write-back, the remote-default-on amendment, and per-Realm persona config.

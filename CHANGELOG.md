@@ -3,6 +3,25 @@
 All notable changes to Memoring — the frozen specification baseline and the v0 implementation
 built against it — are recorded here.
 
+## Unreleased — chat (multi-turn conversational output)
+
+- **Converse with your Realm.** Added `memoring chat` — the multi-turn output-layer surface from
+  [ADR-0011](docs/adr/0011-conversational-output-llm.md). A session binds to exactly ONE Realm (the
+  Realm + scope resolve once up front, fail-closed to Silence on ambiguity, just like `ask` /
+  `search`); cross-Realm recall is impossible by construction (§3). Reads questions from stdin
+  (`:exit` to end). **Each turn reuses the exact `ask` guarantees** — gated retrieval via
+  `searchRealm` (strictly downstream of the Gate), strict grounding (0 results → no answer, no model
+  call), answers ONLY from the released excerpts in the user's language, the signed
+  `memoring:ouroboros` marker on every answer, and **read-only** (no Events / Claims / candidates).
+  Conversation context is kept across turns for the model's phrasing, but every turn still performs
+  its OWN gated retrieval (one-shot per turn; agentic multi-hop stays deferred, §2).
+- **Per-role output provider (`MEMORING_ASK_*`).** The output role (`ask` / `chat`) now reads a
+  dedicated `MEMORING_ASK_BASE_URL` / `_MODEL` / `_API_KEY` / `_EGRESS` namespace, falling back
+  per-variable to the loop's `MEMORING_LLM_*` when unset — so the conversational renderer can use a
+  different model than the loop classifier (§6). The `OutputProvider` interface is unchanged. The
+  egress posture is **untouched**: local-by-default, remote OPT-IN behind the shared
+  `MEMORING_LLM_REMOTE_OPT_IN` — no default flipped, no §7.3 / §7.5 amendment.
+
 ## Unreleased — ask (conversational output)
 
 - **Talk to your Realm.** Added `memoring ask "<question>"` — the v1 output-layer LLM from
@@ -24,8 +43,7 @@ built against it — are recorded here.
 - **Read-only + Ouroboros.** v1 creates no Events / Claims / candidates. The printed answer carries
   the signed `memoring:ouroboros` self-generation marker, so it can never launder back in as
   evidence or reinforcement. One invocation binds to exactly one Realm. See
-  [ADR-0011 Addendum](docs/adr/0011-conversational-output-llm.md) for the settled egress posture; a
-  per-role config split (`MEMORING_ASK_*`) and agentic multi-hop retrieval remain follow-ups.
+  [ADR-0011 Addendum](docs/adr/0011-conversational-output-llm.md) for the settled egress posture.
 
 ## Unreleased — import from AI
 
