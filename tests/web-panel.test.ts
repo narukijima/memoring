@@ -7,10 +7,12 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openRealmLocal } from '@core/runtime';
 import { readRegistry } from '@core/realm-registry';
 import { ingestImport } from '@intake/import-from-ai';
+import { getOrCreateLabel } from '@claim/classify';
+import { searchRealm } from '@retrieval/search';
 import { createReplicaAtRoot } from '../apps/cli/commands/init';
 import { createRealm } from '../apps/cli/realm-actions';
 import { startPanelServer, type RunningPanel } from '../apps/server/panel';
@@ -64,6 +66,18 @@ function request(opts: {
     if (payload) req.write(payload);
     req.end();
   });
+}
+
+/** Concatenate every audit.log under `dir` — both the registry-level log and each
+ *  Realm's own — so a secret leak into any trail is caught (NFR-004). */
+function readAllAudit(dir: string): string {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(readAllAudit(full));
+    else if (entry.name === 'audit.log') out.push(fs.readFileSync(full, 'utf8'));
+  }
+  return out.join('\n');
 }
 
 describe('web control panel — security gate + owner write surface', () => {
@@ -194,5 +208,132 @@ describe('web control panel — security gate + owner write surface', () => {
     expect(r.text).toContain('confirm_required');
     // Still present after the refused delete.
     expect(readRegistry(home).realms.some((x) => x.name === 'second')).toBe(true);
+  });
+
+  // ── Unlock passphrase / recovery code never leak (NFR-004) ─────────────────
+
+  it('never persists, logs, or audits the unlock passphrase or the recovery code', async () => {
+    const PASSPHRASE = 'correct horse battery staple';
+    const captured: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => captured.push(a.map(String).join(' ')));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => captured.push(a.map(String).join(' ')));
+    try {
+      // Create a passphrase Realm through the panel; the recovery code is returned ONCE.
+      const created = await request({
+        port: panel.port,
+        method: 'POST',
+        path: '/api/realms',
+        token: TOKEN,
+        body: { name: 'locked', mode: 'passphrase', passphrase: PASSPHRASE },
+      });
+      expect(created.status).toBe(201);
+      const { realm_id: realmId, recovery_code: recoveryCode } = JSON.parse(created.text) as {
+        realm_id: string;
+        recovery_code: string;
+      };
+      expect(typeof recoveryCode).toBe('string');
+      expect(recoveryCode.length).toBeGreaterThan(0);
+
+      // A write that unlocks with the passphrase succeeds (the provider holds it for
+      // the unlock only).
+      const wrote = await request({
+        port: panel.port,
+        method: 'POST',
+        path: `/api/import?realm=${realmId}`,
+        token: TOKEN,
+        body: { text: CLAUDE_EXPORT, provider: 'claude', passphrase: PASSPHRASE },
+      });
+      expect(wrote.status).toBe(200);
+
+      // Neither secret may appear in any audit log or in captured stdout/stderr.
+      const sinks = [readAllAudit(home), captured.join('\n')];
+      for (const sink of sinks) {
+        expect(sink).not.toContain(PASSPHRASE);
+        expect(sink).not.toContain(recoveryCode);
+      }
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  });
+
+  it('returns 423 realm_locked for a passphrase-required write with no passphrase', async () => {
+    const created = await request({
+      port: panel.port,
+      method: 'POST',
+      path: '/api/realms',
+      token: TOKEN,
+      body: { name: 'locked', mode: 'passphrase', passphrase: 'correct horse battery staple' },
+    });
+    expect(created.status).toBe(201);
+    const { realm_id: realmId } = JSON.parse(created.text) as { realm_id: string };
+
+    const wrote = await request({
+      port: panel.port,
+      method: 'POST',
+      path: `/api/import?realm=${realmId}`,
+      token: TOKEN,
+      body: { text: CLAUDE_EXPORT, provider: 'claude' },
+    });
+    expect(wrote.status).toBe(423);
+    expect(wrote.text).toContain('realm_locked');
+  });
+
+  // ── Panel write-route wiring (HTTP-layer coverage) ─────────────────────────
+
+  it('forget gates on confirm and dispatches the clm_ seal path', async () => {
+    const ctx = openRealmLocal(home);
+    ingestImport(ctx, Buffer.from(CLAUDE_EXPORT, 'utf8'), { providerHint: 'claude' });
+    ctx.close(true);
+
+    const cands = JSON.parse(
+      (await request({ port: panel.port, path: '/api/import/candidates', token: TOKEN })).text,
+    ) as Array<{ claim_id: string; statement: string }>;
+    const claimId = cands.find((c) => c.statement.includes(CANDIDATE_TEXT))?.claim_id;
+    expect(claimId).toMatch(/^clm_/);
+
+    // confirm omitted → refused (the destructive-action gate).
+    const refused = await request({ port: panel.port, method: 'POST', path: '/api/forget', token: TOKEN, body: { id: claimId } });
+    expect(refused.status).toBe(400);
+    expect(refused.text).toContain('confirm_required');
+
+    // confirm: true → the clm_ branch seals and forgets exactly one Claim.
+    const forgot = await request({ port: panel.port, method: 'POST', path: '/api/forget', token: TOKEN, body: { id: claimId, confirm: true } });
+    expect(forgot.status).toBe(200);
+    expect(JSON.parse(forgot.text)).toMatchObject({ forgotten: 1 });
+  });
+
+  it('promotes an imported candidate so the post-promote indexClaim makes it recallable', async () => {
+    const ctx = openRealmLocal(home);
+    ingestImport(ctx, Buffer.from(CLAUDE_EXPORT, 'utf8'), { providerHint: 'claude' });
+    ctx.close(true);
+
+    const cands = JSON.parse(
+      (await request({ port: panel.port, path: '/api/import/candidates', token: TOKEN })).text,
+    ) as Array<{ claim_id: string; statement: string }>;
+    const claimId = cands.find((c) => c.statement.includes(CANDIDATE_TEXT))?.claim_id;
+    expect(claimId).toBeTruthy();
+
+    const promote = await request({
+      port: panel.port,
+      method: 'POST',
+      path: '/api/import/promote',
+      token: TOKEN,
+      body: { claim_id: claimId, scope: 'panel-scope', sensitivity: 'internal' },
+    });
+    expect(promote.status).toBe(200);
+
+    // A promoted candidate is evidence-less (laundering closed), so it is NOT a
+    // browse-pane row — the /api/memories view is evidence-scoped. Its recall path
+    // is the search index the handler rebuilds via indexClaim (panel.ts ~409,
+    // ADR-0007). Verify that index hit under the chosen scope label.
+    const verify = openRealmLocal(home);
+    try {
+      const label = getOrCreateLabel(verify, 'panel-scope', new Date());
+      const hits = searchRealm(verify, 'english', { activeLabelIds: [label.label_id] });
+      expect(hits.some((h) => h.ref_type === 'claim')).toBe(true);
+    } finally {
+      verify.close(false);
+    }
   });
 });
