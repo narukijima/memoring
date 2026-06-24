@@ -8,10 +8,10 @@
 // fixes only their constraints.
 import fs from 'node:fs';
 import path from 'node:path';
-import { replicaLayout } from '@core/paths';
-import { isPassphraseMode, openActiveRealm } from '@core/runtime';
+import { isActiveRealmSilence, isPassphraseMode, openResolvedRealm } from '@core/runtime';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import { printActiveRealmSilence } from './resolve';
 
 export async function cmdExport(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
@@ -32,31 +32,34 @@ export async function cmdExport(argv: string[]): Promise<number> {
   }
 
   // Flush any pending state into the encrypted blob, then copy the replica.
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
+  const ctx = opened;
   let realmId = '';
   let claims = 0;
+  let root = '';
   try {
     ctx.flush();
     realmId = ctx.realmId;
     claims = ctx.store.listClaims(ctx.realmId).length;
+    root = ctx.layout.root;
     ctx.audit('backup_export', { claims });
   } finally {
     ctx.close(true);
   }
 
-  const layout = replicaLayout();
   // Passphrase mode copies only the scrypt-wrapped bundle → the backup stays
   // sealed. Default (passwordless) mode also copies the unwrapped local key
   // (keys/key.json), so the backup is self-decrypting — report that honestly
   // instead of claiming it stays sealed.
-  const sealed = isPassphraseMode(layout.root);
+  const sealed = isPassphraseMode(root);
   const target = path.resolve(process.cwd(), dest);
   if (fs.existsSync(target) && fs.readdirSync(target).length > 0) {
     console.error(`  Destination ${target} is not empty. Refusing to overwrite.`);
     return 1;
   }
   fs.mkdirSync(target, { recursive: true, mode: 0o700 });
-  fs.cpSync(layout.root, target, { recursive: true });
+  fs.cpSync(root, target, { recursive: true });
 
   const manifest = {
     kind: 'memoring-backup',

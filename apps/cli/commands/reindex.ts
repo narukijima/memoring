@@ -1,10 +1,10 @@
 // `memoring index rebuild` — deterministically rebuild the search index from the
 // lower layers / Chronicle (NFR-006). The index is a regenerable projection.
-import { replicaLayout } from '@core/paths';
-import { openActiveRealm } from '@core/runtime';
+import { isActiveRealmSilence, openResolvedRealm } from '@core/runtime';
 import { rebuildIndex } from '@retrieval/search';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import { printActiveRealmSilence } from './resolve';
 
 export async function cmdIndex(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
@@ -13,7 +13,9 @@ export async function cmdIndex(argv: string[]): Promise<number> {
     console.error('Usage: memoring index rebuild');
     return 1;
   }
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
+  const ctx = opened;
   try {
     const stats = rebuildIndex(ctx);
     ctx.flush();

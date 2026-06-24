@@ -1,8 +1,7 @@
 // `memoring backfill` — ingest history from the registered sources by running
 // the loop once (capture → normalize → classify → abstract → consolidate). OFF
 // by default at init; this is the explicit opt-in path (FR-010).
-import { replicaLayout } from '@core/paths';
-import { openActiveRealm, type RealmContext } from '@core/runtime';
+import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { runLoop } from '@core/loop';
 import { getConnector } from '@intake/registry';
 import { getSourceCursor } from '@intake/capture';
@@ -10,10 +9,13 @@ import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 import { resolveProvider } from '../provider';
 import { isDryRun, printLoopStats, sampleLineCount } from './connect';
+import { printActiveRealmSilence } from './resolve';
 
 export async function cmdBackfill(argv: string[]): Promise<number> {
   const flags = parseFlags(argv); // --since reserved; --dry-run previews without ingesting
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
+  const ctx = opened;
   try {
     if (ctx.config.connectors.length === 0) {
       console.log('  No connectors configured. Run `memoring connect claude-code` first.');

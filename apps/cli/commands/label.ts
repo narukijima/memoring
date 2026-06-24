@@ -2,14 +2,14 @@
 // (FR-023..027). Confirmation authority is user/policy/rule only; AI never
 // confirms a merge. merge unions evidence (re-points assignments) and never
 // silently drops.
-import { replicaLayout } from '@core/paths';
-import { openActiveRealm, type RealmContext } from '@core/runtime';
+import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { rebuildIndex } from '@retrieval/search';
 import { normalizeLabel } from '@core/label-normalize';
 import { realmHmac } from '@security/crypto-primitives';
 import type { Label } from '@core/schema/entities';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import { printActiveRealmSilence } from './resolve';
 
 function findLabel(ctx: RealmContext, nameOrId: string): Label | undefined {
   if (nameOrId.startsWith('lbl_')) return ctx.store.getLabel(nameOrId);
@@ -19,7 +19,9 @@ function findLabel(ctx: RealmContext, nameOrId: string): Label | undefined {
 export async function cmdLabel(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const sub = flags._[0];
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
+  const ctx = opened;
   let dirty = true;
   try {
     switch (sub) {

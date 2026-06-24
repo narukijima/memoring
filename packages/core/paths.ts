@@ -20,6 +20,18 @@ export function defaultReplicaRoot(): string {
   return process.env.MEMORING_HOME ?? path.join(os.homedir(), '.memoring');
 }
 
+export function basePath(): string {
+  return process.env.MEMORING_HOME ?? path.join(os.homedir(), '.memoring');
+}
+
+export function registryPath(base = basePath()): string {
+  return path.join(base, 'realms.toml');
+}
+
+export function registryRealmsDir(base = basePath()): string {
+  return path.join(base, 'realms');
+}
+
 export function replicaLayout(root = defaultReplicaRoot()): ReplicaLayout {
   return {
     root,

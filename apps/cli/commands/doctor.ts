@@ -6,14 +6,21 @@
 // permissions (FR-084).
 import fs from 'node:fs';
 import { replicaLayout } from '@core/paths';
-import { openActiveRealm, replicaExists } from '@core/runtime';
+import { isActiveRealmSilence, openActiveRealm, replicaExists, resolveActiveReplicaRoot } from '@core/runtime';
 import { listConnectors } from '@intake/registry';
 import { getPassphrase } from '../prompt';
+import { parseFlags } from '../args';
 
-export async function cmdDoctor(): Promise<number> {
-  const layout = replicaLayout();
+export async function cmdDoctor(argv: string[] = []): Promise<number> {
+  const flags = parseFlags(argv);
+  const resolved = resolveActiveReplicaRoot({ flags, cwd: process.cwd(), commandClass: 'mgmt' });
+  if (isActiveRealmSilence(resolved)) {
+    console.log(`  [warn] ${resolved.silence}. Run \`memoring init\` or \`memoring realm new <name>\`.`);
+    return 0;
+  }
+  const layout = replicaLayout(resolved);
   console.log(`  Replica: ${layout.root}`);
-  if (!replicaExists()) {
+  if (!replicaExists(layout.root)) {
     console.log('  [warn] No replica found. Run `memoring init`.');
     return 0;
   }

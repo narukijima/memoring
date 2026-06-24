@@ -2,10 +2,12 @@
 // local key file (no password to remember); `--passphrase` opts into a strong
 // scrypt-wrapped vault with a one-time recovery code (FR-083 becomes opt-in; see
 // docs/adr/0001-passwordless-default.md).
+import fs from 'node:fs';
 import { newId } from '@core/schema/ids';
 import { replicaLayout, REPLICA_SUBDIRS } from '@core/paths';
 import { attachRealm } from '@core/runtime';
 import { type RealmConfig, writeRealmConfig } from '@core/realm';
+import { addRealm, setCurrent, type RealmRegistryKeyMode } from '@core/realm-registry';
 import { createKeyMaterial, createLocalKeyMaterial } from '@security/key-lifecycle';
 import { ensureDir, atomicWriteFile } from '@storage/fs-safety';
 import { claudeCodeConnector } from '@integrations/claude-code/index';
@@ -14,10 +16,77 @@ import { ask, getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 import type { Keyring } from '@security/key-lifecycle';
 
+export interface CreatedReplica {
+  layout: ReturnType<typeof replicaLayout>;
+  config: RealmConfig;
+  keyMode: RealmRegistryKeyMode;
+  recoveryCode?: string;
+}
+
+export function createReplicaAtRoot(opts: {
+  root: string;
+  name: string;
+  usePassphrase: boolean;
+  passphrase?: string;
+  now?: Date;
+}): CreatedReplica {
+  const layout = replicaLayout(opts.root);
+  if (fs.existsSync(layout.realmToml) || fs.existsSync(layout.keyBundle) || fs.existsSync(layout.keyFile)) {
+    throw new Error(`A Memoring replica already exists at ${layout.root}.`);
+  }
+
+  ensureDir(layout.root, 0o700);
+  for (const key of REPLICA_SUBDIRS) ensureDir(layout[key], 0o700);
+
+  let keyring: Keyring;
+  let recoveryCode: string | undefined;
+  if (opts.usePassphrase) {
+    const km = createKeyMaterial(opts.passphrase ?? '');
+    atomicWriteFile(layout.keyBundle, JSON.stringify(km.bundle, null, 2), 0o600);
+    keyring = km.keyring;
+    recoveryCode = km.recoveryCode;
+  } else {
+    const km = createLocalKeyMaterial();
+    atomicWriteFile(layout.keyFile, JSON.stringify(km.keyFile, null, 2), 0o600);
+    keyring = km.keyring;
+  }
+
+  const config: RealmConfig = {
+    schema: 'realm.v1',
+    realm_id: newId('realm'),
+    name: opts.name,
+    created_at: (opts.now ?? new Date()).toISOString(),
+    projects: [],
+    connectors: [],
+  };
+  writeRealmConfig(layout.realmToml, config);
+
+  const ctx = attachRealm(layout, config, keyring);
+  ctx.store.setMeta('realm_id', config.realm_id);
+  ctx.close(true);
+
+  return {
+    layout,
+    config,
+    keyMode: opts.usePassphrase ? 'passphrase' : 'local',
+    ...(recoveryCode ? { recoveryCode } : {}),
+  };
+}
+
+export function registerCreatedReplica(created: CreatedReplica): void {
+  addRealm({
+    name: created.config.name,
+    realm_id: created.config.realm_id,
+    root: created.layout.root,
+    created_at: created.config.created_at,
+    key_mode: created.keyMode,
+  });
+  setCurrent(created.config.realm_id);
+}
+
 export async function cmdInit(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const layout = replicaLayout();
-  const fs = await import('node:fs');
 
   if (fs.existsSync(layout.realmToml) || fs.existsSync(layout.keyBundle) || fs.existsSync(layout.keyFile)) {
     log.error('init:exists', { root: layout.root });
@@ -48,40 +117,14 @@ export async function cmdInit(argv: string[]): Promise<number> {
     }
   }
 
-  // 1. Replica directories (root 0700).
-  ensureDir(layout.root, 0o700);
-  for (const key of REPLICA_SUBDIRS) ensureDir(layout[key], 0o700);
-
-  // 2. Key material. Default = unwrapped local key (0600); opt-in = envelope
-  //    DEK/KEK + one-time recovery code.
-  let keyring: Keyring;
-  let recoveryCode: string | undefined;
-  if (usePassphrase) {
-    const km = createKeyMaterial(passphrase);
-    atomicWriteFile(layout.keyBundle, JSON.stringify(km.bundle, null, 2), 0o600);
-    keyring = km.keyring;
-    recoveryCode = km.recoveryCode;
-  } else {
-    const km = createLocalKeyMaterial();
-    atomicWriteFile(layout.keyFile, JSON.stringify(km.keyFile, null, 2), 0o600);
-    keyring = km.keyring;
-  }
-
-  // 3. Realm config (plaintext, holds resolution basis).
-  const config: RealmConfig = {
-    schema: 'realm.v1',
-    realm_id: newId('realm'),
+  const created = createReplicaAtRoot({
+    root: layout.root,
     name: (flags.name as string) ?? 'default',
-    created_at: new Date().toISOString(),
-    projects: [],
-    connectors: [],
-  };
-  writeRealmConfig(layout.realmToml, config);
-
-  // 4. Initialize the encrypted DB (tables) and persist.
-  const ctx = attachRealm(layout, config, keyring);
-  ctx.store.setMeta('realm_id', config.realm_id);
-  ctx.close(true);
+    usePassphrase,
+    passphrase,
+  });
+  registerCreatedReplica(created);
+  const { config, recoveryCode } = created;
 
   // 5. Report the mode (and the recovery code, once, in strong mode).
   console.log('');

@@ -16,6 +16,7 @@ import { cmdExport } from './commands/export';
 import { cmdRestore } from './commands/restore';
 import { cmdMcp } from './commands/mcp';
 import { cmdRekey } from './commands/rekey';
+import { cmdRealm } from './commands/realm';
 
 const HELP = `Memoring — Sovereign Memory Loop (v0)
 
@@ -24,6 +25,12 @@ Usage:
                                           --passphrase = strong vault + one-time recovery code).
   memoring rekey [--passphrase]           Rotate the KEK: change the passphrase, or upgrade a
                                           passwordless vault to a passphrase one (DEK unchanged).
+  memoring realm new <name> [--passphrase] Create and switch to a new local Realm.
+  memoring realm list [--stats]           List local Realm registry entries.
+  memoring realm use <name|id>            Set the sticky current Realm for management commands.
+  memoring realm current                  Show the resolved current Realm.
+  memoring realm rename <name|id> <name>  Rename a Realm in registry and realm.toml.
+  memoring realm rm <name|id> --yes       Remove a Realm directory and registry entry.
   memoring connect <connector> [opts]    Detect sources, choose include/exclude + Realm assignment.
       connectors: claude-code
       --all | --source <id>              Selection (no whole-tool default).
@@ -78,6 +85,8 @@ async function main(): Promise<number> {
       return cmdInit(rest);
     case 'rekey':
       return cmdRekey(rest);
+    case 'realm':
+      return cmdRealm(rest);
     case 'connect':
       return cmdConnect(rest);
     case 'backfill':
@@ -109,9 +118,9 @@ async function main(): Promise<number> {
     case 'restore':
       return cmdRestore(rest);
     case 'mcp':
-      return cmdMcp();
+      return cmdMcp(rest);
     case 'doctor':
-      return cmdDoctor();
+      return cmdDoctor(rest);
     case 'help':
     case '--help':
     case '-h':

@@ -63,6 +63,26 @@ blob alone, but not against someone who can read your home directory; for that, 
 encryption or `memoring init --passphrase` (strong, but if you lose the passphrase **and** recovery
 code the data is unrecoverable). Rationale: [docs/adr/0001-passwordless-default.md](docs/adr/0001-passwordless-default.md).
 
+## Multiple memories
+
+One Memoring "memory" is one Realm: one directory, one key, one trust boundary. The CLI can manage
+multiple local Realms through a private registry at `<base>/realms.toml`
+(`base = MEMORING_HOME ?? ~/.memoring`). The registry stores names/ids/roots only, never secrets or
+payload.
+
+```bash
+node bin/memoring.mjs realm new work
+node bin/memoring.mjs realm new personal --passphrase
+node bin/memoring.mjs realm list --stats
+node bin/memoring.mjs realm use work
+node bin/memoring.mjs realm current
+```
+
+Recall commands do not guess from the sticky current Realm. They resolve in this order:
+`--realm <id|name>`, direct `MEMORING_HOME` pointing at a replica, then a unique CWD match against
+registered project roots/git remotes. If no Realm is unique, Memoring Silences instead of mixing
+memories. Long-running `watch` must be launched with `--realm` or direct `MEMORING_HOME`.
+
 ## Document map
 
 The specification is the single source of truth for the v0 build. Seven documents, in two

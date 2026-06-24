@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { defaultReplicaRoot, replicaLayout } from '@core/paths';
+import { ensureLegacyRegistered } from '@core/realm-registry';
 import { appendAudit } from '@security/audit';
 import { parseFlags } from '../args';
 
@@ -135,6 +136,7 @@ export async function cmdRestore(argv: string[]): Promise<number> {
     { realm_id: manifest.realm_id ?? 'unknown', same_user: true }, // validated === true above
     new Date().toISOString(),
   );
+  ensureLegacyRegistered(targetRoot);
 
   const sealed = manifest.self_decrypting === false || manifest.encryption === 'passphrase';
   console.log(`  restored → ${targetRoot}`);
