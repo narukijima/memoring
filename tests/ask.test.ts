@@ -84,6 +84,16 @@ describe('ask renderer core — grounding, Silence, Ouroboros (ADR-0011 §4/§5)
       expect(textLooksContextInjected(out.answer)).toBe(true); // Ouroboros marker attached
     }
   });
+
+  it('natural prose with an embedded concrete term still grounds instead of requiring exact search syntax', async () => {
+    const mock = new MockOutputProvider('local', 'The project uses better-sqlite3.');
+    const out = await askRealm(seeded.realm.ctx, mock, 'better-sqlite3について何が分かっている？', {
+      activeLabelIds: active,
+    });
+    expect(out.grounded).toBe(true);
+    expect(mock.calls).toBe(1);
+    expect(mock.prompts[0]!).toContain('better-sqlite3');
+  });
 });
 
 describe('resolveOutputProvider egress posture (local default / remote opt-in; ADR-0011 §5)', () => {
@@ -164,6 +174,50 @@ describe('resolveOutputProvider egress posture (local default / remote opt-in; A
     const provider = resolveOutputProvider();
     expect(provider).not.toBeNull();
     expect(provider!.id).toContain('loop-model'); // the loop's model is reused
+  });
+
+  it('falls back to Realm-local LLM config when no env provider is set', () => {
+    const provider = resolveOutputProvider({
+      base_url: 'http://127.0.0.1:11434/v1',
+      model: 'realm-local-model',
+      egress: 'local',
+    });
+    expect(provider).not.toBeNull();
+    expect(provider!.id).toContain('realm-local-model');
+    expect(provider!.egress).toBe('local');
+  });
+
+  it('does not reuse Realm-local local egress when env overrides the output base URL', () => {
+    process.env.MEMORING_ASK_BASE_URL = 'https://api.deepseek.com/v1';
+    const config = {
+      base_url: 'http://127.0.0.1:11434/v1',
+      model: 'realm-local-model',
+      egress: 'local' as const,
+    };
+
+    expect(resolveOutputProvider(config)).toBeNull();
+    expect(errors.join('\n')).toContain('MEMORING_LLM_REMOTE_OPT_IN');
+
+    process.env.MEMORING_LLM_REMOTE_OPT_IN = '1';
+    const provider = resolveOutputProvider(config);
+    expect(provider).not.toBeNull();
+    expect(provider!.egress).toBe('remote');
+  });
+
+  it('does not trust Realm-local local egress for a non-loopback config URL', () => {
+    const config = {
+      base_url: 'https://api.deepseek.com/v1',
+      model: 'realm-local-model',
+      egress: 'local' as const,
+    };
+
+    expect(resolveOutputProvider(config)).toBeNull();
+    expect(errors.join('\n')).toContain('MEMORING_LLM_REMOTE_OPT_IN');
+
+    process.env.MEMORING_LLM_REMOTE_OPT_IN = '1';
+    const provider = resolveOutputProvider(config);
+    expect(provider).not.toBeNull();
+    expect(provider!.egress).toBe('remote');
   });
 
   it('MEMORING_ASK_* overrides MEMORING_LLM_* for the output role (different model)', () => {

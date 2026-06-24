@@ -20,6 +20,7 @@ import { cmdMcp } from './commands/mcp';
 import { cmdRekey } from './commands/rekey';
 import { cmdRealm } from './commands/realm';
 import { cmdImport } from './commands/import';
+import { cmdConfig } from './commands/config';
 import { versionLine } from '@core/version';
 
 const HELP = `Memoring — Sovereign Memory Loop (v0)
@@ -35,6 +36,10 @@ Usage:
   memoring realm current                  Show the resolved current Realm.
   memoring realm rename <name|id> <name>  Rename a Realm in registry and realm.toml.
   memoring realm rm <name|id> --yes       Remove a Realm directory and registry entry.
+  memoring config show                    Show non-secret Realm operator config.
+  memoring config set local-model --base-url <url> --model <id>
+                                          Persist a loopback local LLM default in realm.toml.
+  memoring config unset local-model       Clear the persisted local LLM default.
   memoring connect <connector> [opts]    Detect sources, choose include/exclude + Realm assignment.
       connectors: claude-code
       --all | --source <id>              Selection (no whole-tool default).
@@ -111,6 +116,8 @@ async function main(): Promise<number> {
       return cmdRekey(rest);
     case 'realm':
       return cmdRealm(rest);
+    case 'config':
+      return cmdConfig(rest);
     case 'connect':
       return cmdConnect(rest);
     case 'import':

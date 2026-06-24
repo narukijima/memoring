@@ -98,6 +98,16 @@ describe('chat per-turn core — grounding, Silence, Ouroboros, continuity (ADR-
     }
   });
 
+  it('natural prose with an embedded concrete term grounds in chat too', async () => {
+    const mock = new MockOutputProvider('local', 'The project uses better-sqlite3.');
+    const out = await chatTurn(seeded.realm.ctx, mock, [], 'better-sqlite3について何が分かっている？', {
+      activeLabelIds: active,
+    });
+    expect(out.grounded).toBe(true);
+    expect(mock.calls).toBe(1);
+    expect(mock.prompts[0]!).toContain('better-sqlite3');
+  });
+
   it('multi-turn: prior turns thread into the next prompt, but each turn retrieves on its own', async () => {
     const mock = new MockOutputProvider('local', 'It uses better-sqlite3.');
     const history: ChatTurn[] = [];

@@ -8,7 +8,7 @@
 // as evidence (§5c). One invocation binds to exactly one Realm (§3).
 import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { resolveActiveProjects } from '@core/realm';
-import { searchRealm, type SearchResult } from '@retrieval/search';
+import { searchRealmForQuestion, type SearchResult } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
@@ -41,7 +41,7 @@ export async function askRealm(
   opts: { activeLabelIds?: string[] } = {},
   now = new Date(),
 ): Promise<AskOutcome> {
-  const results = searchRealm(ctx, query, { activeLabelIds: opts.activeLabelIds });
+  const { results } = searchRealmForQuestion(ctx, query, { activeLabelIds: opts.activeLabelIds });
   if (results.length === 0) return { grounded: false };
   const raw = await provider.generate(buildAskPrompt(query, results));
   return { grounded: true, answer: `${raw.trim()}\n\n${renderRendererMarker(ctx, ASK_RENDERER_RECIPE, now)}` };
@@ -72,7 +72,7 @@ export async function cmdAsk(argv: string[]): Promise<number> {
     }
     // No usable output model → actionable guidance + non-zero; never fabricate an
     // answer (no rule-based fallback for the renderer, ADR-0011 §5/§6).
-    const provider = resolveOutputProvider();
+    const provider = resolveOutputProvider(ctx.config.llm);
     if (!provider) return 1;
 
     const activeLabelIds = resolveActiveLabelIds(ctx, res.projectIds, flags.scope as string | undefined);

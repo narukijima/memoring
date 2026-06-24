@@ -3,7 +3,8 @@
 // (Mode A). When MEMORING_LLM_BASE_URL is set, build an OpenAI-compatible LLM
 // provider (Mode B local / Mode C remote) — one adapter covers OpenAI, DeepSeek,
 // and a local Ollama endpoint. The API key comes from env and is never persisted
-// in realm config.
+// in realm config. Realm config may store non-secret local defaults; env vars
+// remain the per-invocation override.
 //
 // Remote (off-device) egress is DEFAULT-OFF (Specification §7.3 remote-ai-default-off):
 // it requires an explicit MEMORING_LLM_REMOTE_OPT_IN, otherwise Memoring refuses
@@ -14,22 +15,26 @@ import { RuleBasedProvider, type MemoryProvider } from '@claim/provider';
 import { LlmMemoryProvider } from '@claim/llm-provider';
 import { OpenAiCompatibleBackend, isLoopback } from '@integrations/llm/openai-compatible';
 import { log } from '@core/log';
+import type { RealmLlmConfig } from '@core/realm';
 
-export function resolveProvider(): MemoryProvider {
-  const baseURL = process.env.MEMORING_LLM_BASE_URL;
+export function resolveProvider(config?: RealmLlmConfig): MemoryProvider {
+  const baseUrlFromEnv = process.env.MEMORING_LLM_BASE_URL;
+  const baseURL = baseUrlFromEnv ?? config?.base_url;
   if (!baseURL) return new RuleBasedProvider();
 
-  const model = process.env.MEMORING_LLM_MODEL;
+  const model = process.env.MEMORING_LLM_MODEL ?? config?.model;
   if (!model) {
     log.warn('provider:llm_missing_model', { hint: 'set MEMORING_LLM_MODEL' });
     return new RuleBasedProvider();
   }
 
   const proxy = isTruthy(process.env.MEMORING_LLM_PROXY);
+  const egressSetting =
+    process.env.MEMORING_LLM_EGRESS ?? configEgressForBaseUrl(baseURL, baseUrlFromEnv, config);
   let egress: 'local' | 'remote' | undefined =
-    process.env.MEMORING_LLM_EGRESS === 'local'
+    egressSetting === 'local'
       ? 'local'
-      : process.env.MEMORING_LLM_EGRESS === 'remote'
+      : egressSetting === 'remote'
         ? 'remote'
         : undefined;
 
@@ -68,6 +73,17 @@ export function resolveProvider(): MemoryProvider {
   const provider = new LlmMemoryProvider(backend);
   log.info('provider:llm', { id: provider.id, egress: provider.egress, proxy });
   return provider;
+}
+
+function configEgressForBaseUrl(
+  baseURL: string,
+  baseUrlFromEnv: string | undefined,
+  config: RealmLlmConfig | undefined,
+): 'local' | 'remote' | undefined {
+  if (baseUrlFromEnv !== undefined) return undefined;
+  if (config?.egress === 'remote') return 'remote';
+  if (config?.egress === 'local' && isLoopback(baseURL)) return 'local';
+  return undefined;
 }
 
 function isTruthy(v: string | undefined): boolean {

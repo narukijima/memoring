@@ -115,6 +115,11 @@ export interface SearchOptions {
   limit?: number;
 }
 
+export interface QuestionSearchResult {
+  results: SearchResult[];
+  queries: string[];
+}
+
 /** Run exact ∪ n-gram search, filtered to classified / non-secret / in-scope. */
 export function searchRealm(ctx: RealmContext, query: string, opts: SearchOptions = {}): SearchResult[] {
   const nq = norm(query);
@@ -156,6 +161,79 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
   }
   return out;
 }
+
+/**
+ * Natural-language `ask` / `chat` retrieval helper. It preserves the hard safety
+ * contract of searchRealm (same Gate/scope filters, no model call before retrieval)
+ * but fixes the CLI ergonomics: if the full question misses, retry with concrete
+ * code-like / alphanumeric terms embedded in the question (e.g. Japanese prose
+ * around `redaction` or `better-sqlite3`).
+ */
+export function searchRealmForQuestion(ctx: RealmContext, query: string, opts: SearchOptions = {}): QuestionSearchResult {
+  const limit = opts.limit ?? 20;
+  const queries = queryCandidates(query);
+  const first = searchRealm(ctx, queries[0] ?? query, { ...opts, limit });
+  if (first.length > 0 || queries.length <= 1) return { results: first, queries: queries.slice(0, 1) };
+
+  const seen = new Set<string>();
+  const merged: SearchResult[] = [];
+  const used = [queries[0]!];
+  for (const candidate of queries.slice(1)) {
+    used.push(candidate);
+    for (const result of searchRealm(ctx, candidate, { ...opts, limit })) {
+      if (seen.has(result.ref_id)) continue;
+      seen.add(result.ref_id);
+      merged.push(result);
+      if (merged.length >= limit) return { results: merged, queries: used };
+    }
+    if (merged.length > 0) return { results: merged, queries: used };
+  }
+  return { results: [], queries: used };
+}
+
+export function queryCandidates(query: string): string[] {
+  const out: string[] = [];
+  const add = (value: string | undefined): void => {
+    const trimmed = value?.trim();
+    if (!trimmed) return;
+    const normalized = trimmed.replace(/^['"`]+|['"`]+$/g, '');
+    if (!normalized) return;
+    if (!out.some((v) => norm(v) === norm(normalized))) out.push(normalized);
+  };
+
+  add(query);
+  for (const quoted of query.matchAll(/[`"'“”‘’]([^`"'“”‘’]{2,})[`"'“”‘’]/g)) add(quoted[1]);
+  for (const term of query.match(/[A-Za-z0-9][A-Za-z0-9._:/@+-]{2,}/g) ?? []) {
+    if (!STOP_WORDS.has(term.toLowerCase())) add(term);
+  }
+  return out;
+}
+
+const STOP_WORDS = new Set([
+  'about',
+  'what',
+  'which',
+  'where',
+  'when',
+  'who',
+  'why',
+  'how',
+  'the',
+  'and',
+  'for',
+  'with',
+  'you',
+  'your',
+  'are',
+  'is',
+  'was',
+  'were',
+  'can',
+  'could',
+  'tell',
+  'know',
+  'please',
+]);
 
 /** Honor identity/content Seals at query time so a forgotten event or claim is
  *  never re-emitted via search/MCP, even from an index row that predates the Seal. */

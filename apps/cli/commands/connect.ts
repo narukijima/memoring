@@ -98,7 +98,7 @@ export async function cmdConnect(argv: string[]): Promise<number> {
 
     if (flags.backfill === true) {
       console.log('  Running backfill loop...');
-      const stats = await runLoop(ctx, { method: 'backfill', provider: resolveProvider() });
+      const stats = await runLoop(ctx, { method: 'backfill', provider: resolveProvider(ctx.config.llm) });
       printLoopStats(stats);
     } else {
       console.log('  Next: `memoring backfill` to ingest history, then `memoring context build`.');

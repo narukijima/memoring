@@ -17,7 +17,7 @@
 import readline from 'node:readline';
 import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { resolveActiveProjects } from '@core/realm';
-import { searchRealm, type SearchResult } from '@retrieval/search';
+import { searchRealmForQuestion, type SearchResult } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
@@ -73,7 +73,7 @@ export async function chatTurn(
   opts: { activeLabelIds?: string[] } = {},
   now = new Date(),
 ): Promise<ChatOutcome> {
-  const results = searchRealm(ctx, query, { activeLabelIds: opts.activeLabelIds });
+  const { results } = searchRealmForQuestion(ctx, query, { activeLabelIds: opts.activeLabelIds });
   if (results.length === 0) return { grounded: false };
   const reply = (await provider.generate(buildChatPrompt(history, query, results))).trim();
   return { grounded: true, answer: `${reply}\n\n${renderRendererMarker(ctx, CHAT_RENDERER_RECIPE, now)}`, reply };
@@ -100,7 +100,7 @@ export async function cmdChat(argv: string[], input: NodeJS.ReadableStream = pro
     }
     // No usable output model → actionable guidance + non-zero; never fabricate an
     // answer (no rule-based fallback for the renderer, ADR-0011 §5/§6).
-    const provider = resolveOutputProvider();
+    const provider = resolveOutputProvider(ctx.config.llm);
     if (!provider) return 1;
 
     const activeLabelIds = resolveActiveLabelIds(ctx, res.projectIds, flags.scope as string | undefined);

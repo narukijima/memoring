@@ -49,6 +49,12 @@ describe('CLI dispatch wiring (subprocess)', () => {
     expect(out).toContain('Active Realm unresolved'); // reached cmdAsk → realm resolution
   }, 30000);
 
+  it('`config` is dispatched (not "Unknown command")', () => {
+    const { out } = runCli(['config', 'show']);
+    expect(out).not.toContain('Unknown command');
+    expect(out).toContain('Active Realm unresolved'); // reached cmdConfig → realm resolution
+  }, 30000);
+
   it('an unknown command DOES report "Unknown command" (the guard is meaningful)', () => {
     const { out, code } = runCli(['definitely-not-a-command']);
     expect(out).toContain('Unknown command');

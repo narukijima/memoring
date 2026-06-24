@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { searchRealm, rebuildIndex, indexEvent } from '@retrieval/search';
+import { searchRealm, searchRealmForQuestion, queryCandidates, rebuildIndex, indexEvent } from '@retrieval/search';
 import { handleMcpRequest } from '@retrieval/mcp';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { newId } from '@core/schema/ids';
@@ -26,6 +26,15 @@ describe('search (FR-040..042, NFR-018)', () => {
   it('finds events via n-gram fallback (English substring ≥3 chars)', () => {
     const hits = searchRealm(seeded.realm.ctx, 'indentation', { activeLabelIds: active });
     expect(hits.length).toBeGreaterThan(0);
+  });
+
+  it('extracts concrete terms from natural questions for ask/chat retrieval', () => {
+    expect(queryCandidates('better-sqlite3について何が分かっている？')).toContain('better-sqlite3');
+    const out = searchRealmForQuestion(seeded.realm.ctx, 'better-sqlite3について何が分かっている？', {
+      activeLabelIds: active,
+    });
+    expect(out.results.length).toBeGreaterThan(0);
+    expect(out.queries).toContain('better-sqlite3');
   });
 
   it('never returns the secret text (G3 / CON-007)', () => {

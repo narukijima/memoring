@@ -10,6 +10,8 @@ import { isActiveRealmSilence, openActiveRealm, resolveActiveReplicaRoot, type R
 import { getConnector } from '@intake/registry';
 import { runLoop, type LoopStats } from '@core/loop';
 import { log } from '@core/log';
+import { replicaLayout } from '@core/paths';
+import { readRealmConfig } from '@core/realm';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 import { resolveProvider } from '../provider';
@@ -80,7 +82,7 @@ export async function cmdWatch(argv: string[]): Promise<number> {
     return 0;
   }
 
-  const memoryProvider = resolveProvider();
+  const memoryProvider = resolveProvider(readRealmConfig(replicaLayout(root).realmToml).llm);
 
   // Catch-up pass.
   printStats(await withRealm((ctx) => runLoop(ctx, { method: 'watch', provider: memoryProvider })));
