@@ -3,6 +3,30 @@
 All notable changes to Memoring — the frozen specification baseline and the v0 implementation
 built against it — are recorded here.
 
+## Unreleased — import from AI
+
+- **Import memory from other AIs.** Added `memoring import` — paste a foreign-AI export
+  ("everything you know about me" from ChatGPT/Claude/Gemini) via `--file`, `--text`, or stdin into
+  the active Realm. A tolerant parser handles both shipped formats (Claude `[date] - entry` lines;
+  Gemini bullets with a verbatim `根拠` quote + `インポート元`), auto-detects the provider, and
+  **quarantines** unparseable input with no raw loss. See
+  [docs/adr/0007-import-from-ai.md](docs/adr/0007-import-from-ai.md).
+- **Non-authoritative by construction.** Each entry lands as a `host_memory` Event (an origin already
+  in `NON_EVIDENCE_ORIGINS`, so it can never be independent evidence, is never abstracted, and is
+  Silenced by the Gate) plus a `candidate` Claim with no evidence (the `add_memory_candidate`
+  precedent). Imported candidates **never auto-consolidate and never auto-reject** —
+  `consolidatePending` skips them — so a pasted AI summary cannot launder itself into confirmed,
+  re-exportable first-party memory.
+- **User promotion is the only path to authority.** `memoring import list` / `promote <id> --scope
+  <label> [--sensitivity …]` / `reject <id>` — promotion is an explicit per-item user decision (a
+  §5.2 authority) that confirms a candidate as a `created_by:'user'`, recallable memory; the foreign
+  AI never confers authority on its own. Re-pasting the same export dedups (realm_key-derived,
+  reprocess-invariant content anchors). `memoring import --print-prompt <provider>` hands back the
+  export prompt to run elsewhere.
+- **Floor preserved.** No new origin, Claim state, Gate, or egress channel; imports target the active
+  Realm via the ADR-0006 resolution; secret-scan runs on every imported entry. Implements the
+  ChatGPT/Claude/Gemini-export connector parked in [ADR-0004 §7](docs/adr/0004-v0_1-candidates.md).
+
 ## Unreleased — multi-Realm CLI
 
 - **First-class multi-Realm management.** Added `memoring realm new/list/use/current/rename/rm`

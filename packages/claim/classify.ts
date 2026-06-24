@@ -12,7 +12,7 @@ import { realmHmac } from '@security/crypto-primitives';
 import { maxSensitivity, type Sensitivity } from '@core/schema/enums';
 import type { Assignment, Label, MemEvent } from '@core/schema/entities';
 
-function getOrCreateLabel(ctx: RealmContext, name: string, now: Date): Label {
+export function getOrCreateLabel(ctx: RealmContext, name: string, now: Date): Label {
   const normalized = normalizeLabel(name);
   const key = realmHmac(ctx.realmKey, normalized);
   const existing = ctx.store.findLabelByNormalizedKey(ctx.realmId, key);

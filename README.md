@@ -89,6 +89,34 @@ Recall commands do not guess from the sticky current Realm. They resolve in this
 registered project roots/git remotes. If no Realm is unique, Memoring Silences instead of mixing
 memories. Long-running `watch` must be launched with `--realm` or direct `MEMORING_HOME`.
 
+## Import memory from another AI
+
+Other AI tools (ChatGPT / Claude / Gemini) can export "everything they know about you" via a prompt.
+Memoring imports that pasted answer into a Realm — but, because it is **both AI-authored and
+off-device**, it is the exact content the safety core forbids from gaining authority. So an import is
+**inert until you confirm it**: each entry becomes a non-authoritative `host_memory` record plus a
+review **candidate** that is never recalled, never abstracted into evidence, and never
+auto-consolidated. You promote the ones you want; that explicit decision is the only thing that turns
+a foreign AI's summary into a real, recallable memory.
+
+```bash
+# 1. Get the export prompt to run in the other tool, then run it there and copy the answer:
+memoring import --print-prompt claude        # or gemini | chatgpt
+
+# 2. Bring the pasted answer in (preview first; nothing is persisted on --dry-run):
+memoring import claude --file export.txt --dry-run
+memoring import claude --file export.txt     # or: pbpaste | memoring import gemini
+
+# 3. Review and confirm what you actually want to keep:
+memoring import list
+memoring import promote <claim-id> --scope work --sensitivity internal
+memoring import reject  <claim-id>
+```
+
+Re-pasting the same export dedups. Unparseable input is quarantined (raw kept, never lost). A pasted
+summary can never become independent evidence or be re-emitted as first-party memory without your
+promotion. Design rationale: [docs/adr/0007-import-from-ai.md](docs/adr/0007-import-from-ai.md).
+
 ## Document map
 
 The specification is the single source of truth for the v0 build. Seven documents, in two
