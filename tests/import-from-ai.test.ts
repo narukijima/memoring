@@ -59,6 +59,15 @@ const GEMINI_EXPORT = [
   'インポート元は ChatGPT です。',
 ].join('\n');
 
+// A Gemini export whose secret lives ONLY in the 根拠 quote, not the statement.
+const GEMINI_SECRET_IN_QUOTE = [
+  '## ユーザー属性情報',
+  '* ユーザーの API キーが設定されています。',
+  '    * 根拠: ユーザーは「私のキーは ' + SECRET + ' です」と言いました。日付: [2024-05-01]。',
+  '',
+  'インポート元は Gemini です。',
+].join('\n');
+
 /** Floor invariant: no consolidated claim may rest on an imported (host_memory) event. */
 function noLaunderedEvidence(ctx: RealmContext): boolean {
   for (const c of ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')) {
@@ -180,6 +189,17 @@ describe('import from AI — non-authoritative intake + user promotion', () => {
     expect(secretEvent).toBeTruthy();
     rebuildIndex(ctx);
     expect(searchRealm(ctx, 'akiaiosfodnn', { activeLabelIds: [] }).length).toBe(0);
+  });
+
+  it('secret only in the Gemini 根拠 quote → no candidate (per-entry scan covers the quote)', () => {
+    const r = ingestImport(ctx, Buffer.from(GEMINI_SECRET_IN_QUOTE, 'utf8'));
+    expect(r.secretSkipped).toBe(1);
+    expect(r.candidates).toBe(0); // statement is clean but the quote carries the secret
+    // No candidate exists, so nothing in the review pool leaks the key.
+    expect(listImportedCandidates(ctx)).toHaveLength(0);
+    // The backing Event still exists, marked secret, never indexed.
+    const secretEvent = ctx.store.listEvents(ctx.realmId).find((e) => e.sensitivity === 'secret');
+    expect(secretEvent).toBeTruthy();
   });
 
   it('imported candidates never auto-consolidate AND never auto-reject (loop guard)', () => {

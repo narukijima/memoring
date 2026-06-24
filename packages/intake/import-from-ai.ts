@@ -131,7 +131,11 @@ export function ingestImport(ctx: RealmContext, bytes: Buffer, opts: IngestOptio
     if (ctx.store.getMeta(importEventClaimMetaKey(evIdentity))) continue;
     // secret-scan the entry text independently of the Event (defense in depth): a
     // secret entry creates NO candidate; its raw stays withheld in the Undiluted.
-    if (scanText(entry.statement).detected) {
+    // Scan BOTH the statement AND the backing quote (Gemini 根拠) — a secret living
+    // only in the quote must still suppress the candidate (the Event-level scan in
+    // normalize already marks the whole Event secret, but the per-entry guarantee
+    // "a secret entry creates no candidate" must hold here too).
+    if (scanText(entry.statement).detected || (entry.quote !== null && scanText(entry.quote).detected)) {
       secretSkipped += 1;
       continue;
     }
