@@ -17,6 +17,7 @@ import { cmdRestore } from './commands/restore';
 import { cmdMcp } from './commands/mcp';
 import { cmdRekey } from './commands/rekey';
 import { cmdRealm } from './commands/realm';
+import { versionLine } from '@core/version';
 
 const HELP = `Memoring — Sovereign Memory Loop (v0)
 
@@ -129,7 +130,7 @@ async function main(): Promise<number> {
       return command === undefined ? 1 : 0;
     case 'version':
     case '--version':
-      console.log('memoring v0 (spec-v1.0)');
+      console.log(versionLine());
       return 0;
     default:
       console.error(`Unknown command: ${command}\n`);
