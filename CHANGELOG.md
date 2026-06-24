@@ -18,6 +18,10 @@ built against it — are recorded here.
 - **Safety boundaries preserved.** No cross-Realm search/context, no key/Gate identity changes, and
   `realm rm` is confirmed, audited, refuses the last Realm, and avoids deleting roots that contain
   the registry base or another Realm.
+- **Global `memoring` command.** The `bin/memoring.mjs` launcher is marked executable and the README
+  documents `npm link` (or `npm install -g .`) to put a `memoring` command on the PATH, so the CLI can
+  be run as `memoring <command>` from anywhere (still source-only via `tsx`, no build step). Running
+  `node bin/memoring.mjs <command>` from the repo remains the no-link fallback.
 
 ## 0.1.2 — passwordless by default
 
