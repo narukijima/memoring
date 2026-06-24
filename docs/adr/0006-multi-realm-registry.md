@@ -144,7 +144,14 @@ The registry never keeps a dangling current pointer.
 
 ## Deferred
 
-- Web/app UI for switching Realms.
 - Cross-Realm features of any kind.
 - Sync, first-party backup, live multi-device replication.
 - Moving/migrating an existing legacy direct replica into `<base>/realms/`.
+
+## Since shipped
+
+- A **local web panel** for Realm management arrived in ADR-0010
+  (`apps/server/panel.ts`): it lists registered Realms, switches the viewed Realm
+  per request (explicit Realm id, no CWD/`current` inference), and exposes
+  set-active / create / delete over the owner-write surface. It reuses this
+  registry and the same resolution APIs; it does **not** add cross-Realm recall.

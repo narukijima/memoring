@@ -1,6 +1,6 @@
 # ADR 0002 — Multi-provider LLM memory provider (Mode B/C) and the pre-egress gate
 
-- Status: Accepted (increment 1: provider boundary + pre-egress gate. Live wiring — CLI/config/keys/real backfill — deferred to increment 2.)
+- Status: Accepted (increment 1: provider boundary + pre-egress gate. Increment 2 live wiring — env-based provider selection, API key from env, remote opt-in, and the real backfill path — has since shipped; realm-local non-secret defaults followed in ADR-0012. Remaining items in Deferred below.)
 - Date: 2026-06-20
 - Scope: claim/provider boundary (Basic Design §2.6/§8, Detailed Design §10.1), safety core (egress; Specification §7.3/§7.5), `MemoryProvider` interface
 
@@ -117,13 +117,18 @@ Does **not** protect against:
 
 ## Deferred (explicitly not in this change)
 
-- **Live wiring (increment 2):** realm config to select a provider/model/base_url,
-  API key sourcing from env / OS keychain (never persisted in config), a CLI
-  opt-in, and the first real backfill run — all cost- and privacy-incurring, so
-  gated on explicit user go.
-- Anthropic and Gemini adapters (same `LlmBackend` boundary).
-- Batched `abstract` calls (the signature is already batch-capable; the caller is
-  still per-event).
+- **Live wiring — since shipped (increment 2 complete):** provider/model/base_url
+  selection from env (`MEMORING_LLM_*`, see `apps/cli/provider.ts`) with realm-local
+  non-secret defaults (ADR-0012), API key sourcing from env (never persisted in
+  config), the remote opt-in (`MEMORING_LLM_REMOTE_OPT_IN`, default-off per
+  ADR-0003), and the real backfill run all landed in increment 2. The caller also
+  now **batches** `abstract` — `extractor.ts` slices eligible events into groups of
+  `ABSTRACT_BATCH_SIZE` (12) and issues one `provider.abstract(batch)` per group,
+  so abstraction is batch-per-call, not per-event. Recorded here as done so the
+  boundary is not re-litigated.
+- **Still deferred:** API key sourcing from an **OS keychain** (env is the only
+  source today); Anthropic and Gemini **native adapters** (only the
+  OpenAI-compatible backend ships — it already covers OpenAI/DeepSeek/Ollama).
 - **Origin-aperture widening** — feeding `tool_result` / `command_result` /
   `file_diff` to `abstract` for the kinds §3.3.1 permits (fact / project_context /
   procedure), keeping assistant/host/system excluded so G8 holds. This touches the

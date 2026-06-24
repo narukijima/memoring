@@ -57,10 +57,13 @@ via its own process). They are not expected to match.
 
 ### 2. Upgrade path — now (pre-publish)
 
-`package.json` is `private: true` and Memoring is installed by cloning the repo
-and running `npm link` (or `npm install -g .`). The linked `memoring` runs the
-checked-out source live (source-only via `tsx`, no build step). Therefore the
-supported upgrade is:
+`package.json` already carries publish metadata (`publishConfig.access: public`,
+a `files` allowlist, and the `memoring` `bin`) and no longer sets `private`, but
+Memoring is **still unpublished** — and a published package would not yet resolve
+its own `@core/*` imports under `tsx` inside `node_modules` (see README). So the
+install today is by cloning the repo and running `npm link` (or `npm install -g .`).
+The linked `memoring` runs the checked-out source live (source-only via `tsx`, no
+build step). Therefore the supported upgrade is:
 
 ```text
 git pull            # update the source the linked binary already runs
@@ -72,7 +75,9 @@ version line above makes "what am I running" answerable from a checkout.
 
 ### 3. Upgrade path — future (v1 publish)
 
-At v1, flip `private` → `false` and `npm publish`. The upgrade then becomes:
+The publish metadata is already in place (no `private`; `publishConfig`/`files`/`bin`
+present), so v1 work is the actual `npm publish` once the source-only/`tsx`
+alias-resolution blocker is resolved. The upgrade then becomes:
 
 ```text
 npm install -g memoring@latest      # or: npm update -g memoring
@@ -113,5 +118,6 @@ not memory — but the ethos still applies. Any update check, if ever added, MUS
 - The update-notifier itself is **not implemented**. It is specified here as a
   constraint set so that whoever adds it at publish time cannot quietly make it
   on-by-default, chatty, telemetered, or blocking.
-- Flipping `private` → `false` and the actual `npm publish` are v1 work.
+- The actual `npm publish` is v1 work (the publish metadata is already in place;
+  there is no longer a `private` flag to flip).
 - Any auto-update mechanism is explicitly out of scope, now and at v1.
