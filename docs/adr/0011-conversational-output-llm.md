@@ -47,7 +47,7 @@ Memoring recognizes exactly two LLM roles, separated by the Gate:
 | Layer | Role | Sees | Egress default | This ADR |
 | --- | --- | --- | --- | --- |
 | **Loop-layer** (existing) | `abstract()` — classify / abstract Events → Claim candidates | **raw history** (pre-Gate) | **remote OFF** (ADR-0003 opt-in) | unchanged |
-| **Output-layer** (new) | natural-language I/O renderer | **only post-Gate excerpts** | remote allowed (§5) | introduced here |
+| **Output-layer** (new) | natural-language I/O renderer | **only post-Gate excerpts** | remote-*capable*; default needs a §7.3/§7.5 amendment (§5) | introduced here |
 
 The output-layer LLM is a **language organ**, not a chatbot and not part of consolidation. The
 memory remains the deterministic internal store. Swapping the output provider changes the
@@ -83,12 +83,18 @@ the Gate to the renderer: undetermined → not asserted. No hallucination and no
 general-knowledge backfill are permitted by default. The model's parametric knowledge is a
 phrasing aid, never a source of facts about the owner.
 
-### 5. Egress — provider-agnostic, with the output layer remote-allowed by default
+### 5. Egress — provider-agnostic; the output layer is remote-*capable*, but defaulting it to remote requires a spec amendment
 
-Internal and external providers are treated at **parity** (a swappable registry, §6). For the
-**output layer specifically, remote is allowed by default**, justified by *what the output LLM
-can see*: only post-Gate, secret-free, in-scope excerpts. The mechanism that makes this sound,
-and the mandatory safeguards:
+Internal and external providers are treated at **parity** (a swappable registry, §6). The owner's
+intent is that the output role **may default to remote**, justified by *what the output LLM can
+see*: only post-Gate, secret-free, in-scope excerpts. This is recorded as a **deferred intent, not
+asserted as already-permitted.** A remote output provider rides the `remote_ai` purpose
+(`remote_ai_processing` Audience), which the frozen baseline marks **default-DENY + scope opt-in**
+(policy.v2 `remote-ai-default-off`; Specification §7.3 / §7.5 — the single source of truth).
+Enabling the output role remote **by default would therefore require amending §7.3 / §7.5 /
+policy.v2**; it cannot be a mere implementation knob, and nothing here overrides that default-deny
+posture. The mechanism that bounds *what* such a remote provider could ever see, and the mandatory
+safeguards:
 
 - **(mechanism) The remote output LLM rides the existing `remote_ai_processing` Audience
   column.** A remote output provider is, by definition, a remote AI consuming memory, so its
@@ -114,10 +120,11 @@ and the mandatory safeguards:
   self-promoting to `confirmed`, gated on explicit user confirmation — the same boundary
   ADR-0007 (import) and ADR-0010 (web panel) already hold.
 
-Whether the output role's remote default rides the existing §7.5 scope opt-in or gets a
-dedicated per-role setting is an **implementation decision deferred** to the build phase; this
-ADR does **not** flip §7.5, §7.3, or any egress default. The non-negotiable floor is the Gate
-column above: no raw secret egress, ever, under any provider.
+Until such an amendment exists, the output role is held to the same `remote-ai-default-off` posture
+as any `remote_ai` consumer: **OFF by default, scope opt-in required**. Whether an amended default
+later rides §7.5 scope opt-in or a dedicated per-role setting is itself **deferred**. This ADR does
+**not** flip §7.5, §7.3, or any egress default. The non-negotiable floor is the Gate column above:
+no raw secret egress, ever, under any provider.
 
 ### 6. Provider abstraction — per-role registry; a generate capability is a prerequisite
 
@@ -160,8 +167,9 @@ language organ may adopt a voice the owner sets; it must not infer one from a fi
 - The owner can run the conversation fully on-device (force-local) or accept a remote renderer
   whose input is, by construction, already the safe-to-emit set.
 - A clear separation is recorded between the **loop-layer** (raw history, remote default-OFF,
-  untouched) and the **output-layer** (post-Gate, remote-allowed) so a future implementer
-  cannot quietly relax the raw-history path while building the chat surface.
+  untouched) and the **output-layer** (post-Gate; remote-*capable* but still OFF-by-default until a
+  §7.3/§7.5 amendment) so a future implementer cannot quietly relax the raw-history path — or
+  default the renderer to remote without amending the egress table — while building the chat surface.
 - One concrete prerequisite is named (the provider `generate` capability) so the build does not
   start by mutating a frozen interface ad hoc.
 - No frozen invariant moves and no code ships with this ADR.
@@ -178,5 +186,7 @@ language organ may adopt a voice the owner sets; it must not infer one from a fi
   per-Realm invariant (§3).
 - **Any write-back** beyond the read-only v1 — if added, candidate-only and user-confirmed
   (§5d); not designed here.
-- **The exact reconciliation of the output role's remote default with §7.5 scope opt-in** — an
-  implementation-phase decision; this ADR flips no egress default (§5).
+- **The output role's remote default.** Defaulting the output renderer to remote rides the
+  `remote_ai` purpose that §7.3 / §7.5 / policy.v2 freeze as default-deny + scope opt-in, so it
+  **requires a spec amendment** (a future ADR), not a build-time toggle. Until then the output role
+  is OFF-by-default like any `remote_ai` consumer. This ADR flips no egress default (§5).
