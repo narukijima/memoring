@@ -1,10 +1,14 @@
 # ADR 0010 — Web control panel: read-only browser → owner write surface
 
-- Status: Accepted (plan only — fixes the security boundary; no code or behaviour change ships with this ADR)
-- Date: 2026-06-24
-- Scope: how the local web server (`apps/server/main.ts`, `npm run serve`) gains owner **write**
-  surfaces for the multi-Realm (ADR-0006) and import-from-AI (ADR-0007) features, without crossing a
-  v0 floor. This ADR settles the write-security boundary **before** any code is written.
+- Status: Accepted — **IMPLEMENTED** (both phases). The security model below is built, not merely
+  planned: see `apps/server/panel.ts` (gate + routes), `apps/server/main.ts` (`npm run serve` entry,
+  token delivery) and `tests/web-panel.test.ts` (gate / no-`setCurrent` view-switch / candidate-egress
+  regression tests). The Context section records the read-only baseline this ADR started from.
+- Date: 2026-06-24 (implemented 2026-06-24, PRs #31 panel security + owner writes, #32 regression tests)
+- Scope: how the local web server (`apps/server/main.ts` + `apps/server/panel.ts`, `npm run serve`)
+  gained owner **write** surfaces for the multi-Realm (ADR-0006) and import-from-AI (ADR-0007)
+  features, without crossing a v0 floor. This ADR settled the write-security boundary, then both
+  phases were built against it.
 - Relates to: ADR-0006 (multi-Realm registry / Realm resolution), ADR-0007 (import floor:
   no-AI-authority / candidate review / user promote), ADR-0003 (the Gate is the sole egress
   mechanism), ADR-0004 §3 (HTTP-MCP-beyond-localhost OUT — the **precedent** for "localhost + auth
@@ -17,19 +21,19 @@ CLI features ① multi-Realm (`memoring realm new/list/use/rename/rm`) and ② i
 reflected in the local Web UI. The fixed principle: **the CLI is the source of truth; the Web is a
 thin local control panel over the SAME core functions.**
 
-Today's server is strictly **read-only**:
+The baseline this ADR started from was a strictly **read-only** server (the state before the work
+below shipped; the implemented panel now lives in `apps/server/panel.ts`):
 
-- Binds `127.0.0.1:4319` (`apps/server/main.ts:5-6`; port via `MEMORING_SERVE_PORT`,
-  `configuredPort()`), opens a **single** Realm at `ROOT = MEMORING_HOME` via `openRealmLocal(ROOT)`
-  (`:621`, `:7`) — **passwordless only**.
-- Rejects every non-`GET` with `405` (`:646-649`). Routes: `GET /` (HTML shell), `GET /favicon.ico`,
+- Bound `127.0.0.1:4319` (port via `MEMORING_SERVE_PORT`, `configuredPort()`), opened a **single**
+  Realm at `ROOT = MEMORING_HOME` via `openRealmLocal(ROOT)` — **passwordless only**.
+- Rejected every non-`GET` with `405`. Routes: `GET /` (HTML shell), `GET /favicon.ico`,
   `GET /api/scopes`, `GET /api/memories`, `404` fallback.
-- `GET /api/memories` reads through `listMemoriesForView(ctx, …)` (`:674-678`), which iterates
+- `GET /api/memories` read through `listMemoriesForView(ctx, …)`, which iterates
   `listClaimsByStatus(realm, 'consolidated')` **only** and gates every row with audience
   `human_local_view` + aperture `standard`, `crossScopeAllowed: false` (`packages/retrieval/browse.ts`).
-  Candidates never appear.
-- Has **no `Origin`/`Host` header check** and **no auth token** of any kind. Localhost bind is the
-  only access control.
+  Candidates never appeared.
+- Had **no** `Origin`/`Host` header check and **no** capability token of any kind — the localhost
+  bind was the only access control. Both gaps are now closed (§1; `panel.ts`).
 
 Reflecting ①②'s **management/write** actions in this server crosses a real security boundary: a local
 write server reachable by a browser is attackable by any web page the owner happens to visit
@@ -69,8 +73,8 @@ independent layers gate every request, applied as the first thing in the handler
 
 - **Bind unchanged.** Keep `127.0.0.1:<port>`. Binding off-localhost is **out** (ADR-0004 §3: an
   off-localhost bind would additionally require egress-table adjudication; not in scope here).
-- **`Host` + `Origin` allowlist on EVERY request, fail-closed** (closes a **pre-existing gap** in the
-  read-only server — it has neither today):
+- **`Host` + `Origin` allowlist on EVERY request, fail-closed** (closed a **pre-existing gap** in the
+  read-only server — the baseline had neither; the implemented `handle()` now applies both):
   - Reject unless the `Host` header is **exactly** `127.0.0.1:<port>` or `localhost:<port>`, on
     **every** request including `GET /`, **unconditionally** (never "when present"). This is the
     **DNS-rebinding** gate — a rebound name resolving to loopback presents an attacker `Host` — so it
@@ -95,17 +99,20 @@ independent layers gate every request, applied as the first thing in the handler
     **weakens** the threat model justifying the token. Prefer fragment-only delivery.
   - **No cookies** — the token is never an ambient credential, so a cross-site page cannot ride it
     (the anti-CSRF property, paired with the `Origin` check). The `GET /` shell additionally sets a
-    one-line CSP (`default-src 'self'`; no inline script except the bootstrap nonce) to bound the
-    same-origin-XSS token-theft path that phase-2 candidate/import rendering introduces — the `Origin`
-    check does **not** stop a same-origin XSS.
+    multi-directive CSP (`default-src 'self'`; `script-src 'nonce-…'` — no inline script except the
+    bootstrap nonce; plus `style-src 'self' 'unsafe-inline'`, `img-src 'self' data:`, `connect-src
+    'self'`, `base-uri 'none'`, `form-action 'none'`, `frame-ancestors 'none'`) to bound the
+    same-origin-XSS token-theft path that the candidate/import rendering introduced — the `Origin`
+    check does **not** stop a same-origin XSS (`sendShell` sets this CSP with a per-request nonce).
   - **Reads require the token too.** Decision: **yes.** The panel surfaces full consolidated
-    statements and (phase 2) candidate plaintext that must be owner-only; the localhost bind alone
+    statements and candidate plaintext that must be owner-only; the localhost bind alone
     does not distinguish the owner from another local process. The **only** exception is `GET /`,
     which is exempt from the **token** (so the browser can fetch the static, data-free shell and read
     the fragment) but is **still `Host`-checked** like every other request. Every `/api/*` request —
     read **and** write — requires the `Host`/`Origin` allowlist **and** a valid token (constant-time
     compare).
-- **Owner writes use POST/PUT/DELETE**, all behind the same `Origin`/`Host` + token gate (phase 2).
+- **Owner writes use POST/PUT/DELETE**, all behind the same `Origin`/`Host` + token gate (phase 2;
+  implemented in `panel.ts`'s mutation router and serialized by `withWriteLock`).
 - **Every mutating request is audited** via the existing `appendAudit` contract, with the **same op
   vocabulary** as the CLI (`import_promote`, `import_reject`, `redact`, `delete`, `realm_rm`, …).
   Because the CLI audit trail is non-uniform today (`realm new/use/rename`, `connect` don't audit),
@@ -148,10 +155,10 @@ Flow mirrors `memoring import` exactly: **paste export → `ingestImport` → ca
   largest correctness risk in the design and is named here, not smoothed over. Consequently the pane is
   served on a **dedicated review endpoint**, **MUST NOT** appear in the normal `/api/memories`
   (consolidated) pane, and is **never** an AI/MCP audience or a remote egress — a local human view
-  only. **Phase 2 MUST** cover this endpoint with an explicit egress test (assert a tokenless `GET`
-  returns `401` and leaks no statement text), mirroring the existing red-green egress tests. The
-  durable fix — giving `listImportedCandidates` an audience parameter so the guard lives in core, not
-  transport — is a core change beyond this ADR.
+  only. **Phase 2 covers** this endpoint with an explicit egress test (`tests/web-panel.test.ts`
+  asserts a tokenless `GET` returns `401` and leaks no statement text), mirroring the existing
+  red-green egress tests. The durable fix — giving `listImportedCandidates` an audience parameter so
+  the guard lives in core, not transport — is a core change beyond this ADR.
 - `ingestImport`/`promote`/`reject` already audit via `ctx.audit` — reused verbatim.
 
 ### 4. Realm switching + keys
@@ -167,18 +174,20 @@ Flow mirrors `memoring import` exactly: **paste export → `ingestImport` → ca
   `setCurrent` write**. (On a cold first resolve the explicit-id path runs `resolveExplicitRealm` →
   `ensureLegacyRegistered`, which may perform a **one-time, idempotent** legacy registration write; it
   is failure-tolerant, is **not** the unlocked-`setCurrent` race, and is safe.) A separate, explicit
-  "set active for the CLI" action (phase 2) is the only thing that calls `setCurrent`, and it
-  validates the id exists, serializes the write, and audits it.
-- **Passphrase Realms.** The server is passwordless-only today (`openRealmLocal`). Decision:
-  - **Phase 1** scopes the panel to **passwordless (`key_mode:'local'`) Realms**; passphrase Realms
-    are listed with a clear **"locked"** indicator and are not openable in the browser.
-  - **Phase 2** adds a **local passphrase-entry form** served over `127.0.0.1` behind the
-    `Origin`/token gate, feeding an in-process `passphraseProvider` to `openActiveRealm(root,
-    provider)` (`runtime.ts`). The passphrase is accepted **only via a POST body** (never a query
-    string or URL fragment, given the fragment-logging concern that drove the token delivery choice)
-    and held in memory for the request/unlock only — **never** written to disk, **never** logged, and
-    **never** recorded in audit fields (audit stores ids/counts only, per NFR-004); any future request
-    logging MUST redact the passphrase route's body.
+  "set active for the CLI" action (`/api/realms/active` → `setActiveRealm`) is the only thing that
+  calls `setCurrent`, and it validates the id exists, serializes the write (`withWriteLock`), and audits it.
+- **Passphrase Realms.** The read-only baseline was passwordless-only (`openRealmLocal`); the
+  implemented panel handles both:
+  - **Phase 1** scoped the panel so the default view stays **passwordless (`key_mode:'local'`)**;
+    passphrase Realms are listed with a clear **"locked"** indicator (the `locked` marker from
+    `realmViews`).
+  - **Phase 2** added **passphrase unlock for a locked Realm**: the passphrase is accepted **only via
+    a POST body** (never a query string or URL fragment, given the fragment-logging concern that drove
+    the token delivery choice), fed to an in-process provider in `openRealmForRequest` and held in
+    memory for the request/unlock only — **never** written to disk, **never** logged, and **never**
+    recorded in audit fields (audit stores ids/counts only, per NFR-004); any future request logging
+    MUST redact the passphrase route's body. A passphrase-required write with no passphrase resolves to
+    `423 realm_locked`.
 
 ### 5. CLI is the source of truth (binding constraint)
 
@@ -195,25 +204,34 @@ auth, origin-checking, and (shared-layer) audit — never business logic:
 All floor enforcement (no-auto-promote, scope+sensitivity-required, secret-scan, confirm-on-destroy,
 Gate) stays **centralized in core**, so there is no second place a floor could be relaxed.
 
-### 6. Phasing
+### 6. Phasing (both phases IMPLEMENTED)
 
-**Phase 1 — low risk, mostly read-only (a later PR).**
-- Add the `Origin`/`Host` allowlist to **every** request (closes the pre-existing read-only gap).
-- Add the per-session token scaffold (generate, deliver via fragment URL — `0600` file optional and
-  off by default; in-memory only in the shell; require on every `/api/*`; `GET /` token-exempt but
-  still `Host`-checked).
-- Add a Realm selector driven by the registry; view-switching resolves an **explicit Realm id** and
-  performs **no** `setCurrent` write.
-- Passphrase Realms shown **locked**. Data stays `GET`-only; no owner writes yet.
+**Phase 1 — the read-only floor + transport gate. IMPLEMENTED (`panel.ts`).**
+- The `Origin`/`Host` allowlist runs on **every** request (`hostAllowed`/`originAllowed`, checked in
+  `handle()` before routing — closes the pre-existing read-only gap).
+- The per-session token scaffold exists (`generateToken`, delivered via the fragment URL from
+  `startPanelServer`/`main.ts` — `0600` file optional and off by default via `MEMORING_SERVE_TOKEN_FILE`;
+  in-memory only in the shell; required on every `/api/*`; `GET /` token-exempt but still `Host`-checked).
+- The Realm selector is registry-driven (`/api/realms` → `realmViews`); view-switching resolves an
+  **explicit Realm id** (`openResolvedRealm({ realm })`) and performs **no** `setCurrent` write.
+- Passphrase Realms surface a `locked` marker; the default view stays passwordless.
 
-**Phase 2 — owner writes behind the write floor (a later PR).**
-- Introduce `POST/PUT/DELETE` behind `Origin`/`Host` + token.
-- Realm **create / connect / delete** (wrap the same core fns; add audit at the shared layer, closing
-  the CLI audit gap).
-- Import **paste → review → promote / reject** (dedicated owner-only review endpoint).
-- **forget / redact**.
-- Optional explicit **"set active for CLI"** (`setCurrent`, validated + serialized + audited).
-- **Passphrase-Realm local entry form** (in-memory provider; never persisted).
+**Phase 2 — owner writes behind the write floor. IMPLEMENTED (`panel.ts`).**
+- `POST/PUT/DELETE` run behind `Origin`/`Host` + token and are **serialized** (`withWriteLock`).
+- Realm **create / delete / set-active** wrap the same core fns via the shared
+  `apps/cli/realm-actions.ts` orchestrator, which audits `realm_new` / `realm_rm` / `realm_use` at that
+  shared layer — **not** in the `addRealm`/`setCurrent` primitives (reused by `ensureLegacyRegistered`
+  and idempotent re-adds), closing the CLI audit gap.
+- **connect** wraps `connectSources` (`@intake/connect-sources`) — the shared path the CLI `connect`
+  and the panel both call — which audits `realm_connect` via `ctx.audit` inside the open Realm (a
+  distinct shared module from `realm-actions.ts`, but the same one-trail-across-both-surfaces rule).
+- Import **paste → review → promote / reject** (`/api/import*`), with the dedicated owner-only
+  `/api/import/candidates` review endpoint.
+- **forget / redact** (`/api/forget`, `/api/redact`), each gated on an explicit `confirm:true`.
+- Explicit **"set active for CLI"** (`/api/realms/active` → `setActiveRealm`, validated + serialized + audited).
+- **Passphrase-Realm unlock** accepts the passphrase **only via the POST body**, held in an in-process
+  provider for the unlock and never persisted/logged/audited; a passphrase-required write with no
+  passphrase returns `423 realm_locked`.
 
 ### How each invariant is preserved (point-by-point)
 
@@ -239,20 +257,23 @@ Gate) stays **centralized in core**, so there is no second place a floor could b
 
 ## Consequences
 
-- A single, written boundary for turning the read-only panel into an owner write surface, anchored to
-  the auth-token-plus-origin-check precedent ADR-0004 §3 already set.
-- Two latent hazards in today's code are named and designed around: the unlocked `setCurrent` race
-  (solved by explicit-id view resolution) and the unguarded candidate plaintext (solved by the token +
-  dedicated owner-only endpoint).
-- The pre-existing read-only gap (no `Origin`/`Host` check) is scheduled to close in **phase 1**,
-  before any write endpoint exists.
-- The CLI audit non-uniformity becomes a phase-2 prerequisite (audit in the shared orchestration
-  layer), keeping a single audit contract across both surfaces.
+- A single, written boundary turned the read-only panel into an owner write surface, anchored to
+  the auth-token-plus-origin-check precedent ADR-0004 §3 already set — and the boundary is now built
+  (`panel.ts`), not just designed.
+- Two latent hazards in the prior code were named and designed around, then implemented: the unlocked
+  `setCurrent` race (solved by explicit-id view resolution — `openResolvedRealm({ realm })`, no
+  `setCurrent` on view-switch) and the unguarded candidate plaintext (solved by the token + the
+  dedicated owner-only `/api/import/candidates` endpoint, regression-tested for a tokenless `401` that
+  leaks no statement text).
+- The pre-existing read-only gap (the absent transport check) was closed in **phase 1**: the Host
+  allowlist (fail-closed) and the Origin allowlist run before routing on every request, including
+  `GET /`.
+- The CLI audit non-uniformity was closed by routing Realm create/delete/set-active through the shared
+  `realm-actions.ts` orchestration layer, so CLI and panel share one audit contract.
 
 ## Out of scope (stated explicitly)
 
-- **All implementation / code.** This ADR fixes the boundary only.
-- **New dependencies.**
+- **New dependencies.** The panel ships on the Node stdlib `http` server only.
 - **HTTP / MCP beyond localhost** (ADR-0004 §3) — any off-localhost bind requires egress-table
   adjudication and is a separate ADR.
 - **Cloud hosting** (ADR-0004 §6) — only ever a zero-knowledge carrier of encrypted archives, never a
