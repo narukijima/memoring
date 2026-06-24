@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { cmdRealm } from '../apps/cli/commands/realm';
+import { createRealm, renameRealm, setActiveRealm } from '../apps/cli/realm-actions';
 import { createReplicaAtRoot } from '../apps/cli/commands/init';
 import { cmdSearch } from '../apps/cli/commands/search';
 import { cmdContextBuild } from '../apps/cli/commands/context';
@@ -108,6 +109,33 @@ describe('multi-Realm registry and CLI management', () => {
     ensureLegacyRegistered(base);
     expect(listRealms(base)).toHaveLength(1);
     expect(listRealms(base)[0]!.root).toBe(base);
+  });
+
+  it('writes exactly one lifecycle audit record per orchestrated create/use/rename', () => {
+    // The lifecycle audit lives ONLY in realm-actions.ts (the shared CLI+panel
+    // orchestrator), so each owner action leaves exactly one trail entry.
+    const base = basePath();
+    createRealm({ name: 'alpha', usePassphrase: false });
+    createRealm({ name: 'beta', usePassphrase: false });
+    setActiveRealm('alpha');
+    renameRealm('alpha', 'alpha-renamed');
+
+    expect(auditOpCount(base, 'realm_new')).toBe(2);
+    expect(auditOpCount(base, 'realm_use')).toBe(1);
+    expect(auditOpCount(base, 'realm_rename')).toBe(1);
+  });
+
+  it('emits zero realm_new when ensureLegacyRegistered re-adds an already-known Realm', () => {
+    // The audit is deliberately NOT in addRealm: ensureLegacyRegistered re-adds an
+    // idempotently-known replica on every panel load, which would emit phantom
+    // realm_new records if the audit lived in the primitive.
+    const base = basePath();
+    createReplicaAtRoot({ root: base, name: 'legacy', usePassphrase: false });
+    ensureLegacyRegistered(base);
+    ensureLegacyRegistered(base);
+
+    expect(listRealms(base)).toHaveLength(1);
+    expect(auditOpCount(base, 'realm_new')).toBe(0);
   });
 
   it('creates, lists, switches, renames, and removes Realm directories', async () => {
@@ -401,6 +429,23 @@ describe('multi-Realm resolution after a real init (base replica coexists with o
     expect(await cmdContextBuild([])).toBe(2);
   });
 });
+
+/** Count the registry-scoped audit records (<base>/logs/audit.log) for one op. */
+function auditOpCount(base: string, op: string): number {
+  const logPath = path.join(base, 'logs', 'audit.log');
+  if (!fs.existsSync(logPath)) return 0;
+  return fs
+    .readFileSync(logPath, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .filter((line) => {
+      try {
+        return (JSON.parse(line) as { op?: string }).op === op;
+      } catch {
+        return false;
+      }
+    }).length;
+}
 
 function registryEntry(created: ReturnType<typeof createSearchRealm>) {
   return {

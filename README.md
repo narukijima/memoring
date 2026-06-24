@@ -46,6 +46,10 @@ distribution via `tsx` does not survive a global install: `tsx` skips tsconfig p
 own imports. Unblocking the npm path is gated on that fix (a build/bundle step, or the deferred
 native-dependency / storage-engine decision). Until then, install from source.
 
+> npm publish provenance is intentionally omitted from `publishConfig`: it hard-fails outside an
+> OIDC-authenticated CI run, which does not exist yet. Re-introduce `"provenance": true` together
+> with an OIDC publish workflow when v1 publishing lands.
+
 **From source (the supported path today).** Run the `npm` setup steps from the cloned repository
 directory. After `npm link`, the `memoring` command works from anywhere.
 
