@@ -1,27 +1,23 @@
 // `memoring realm ...` — first-class local multi-Realm management. The registry
 // is plaintext metadata only; each per-Realm realm.toml remains authoritative.
-import fs from 'node:fs';
+// Lifecycle writes (new/use/rename/rm) and their audit live in the shared
+// orchestrators (realm-actions), which the web panel reuses (ADR-0010 §1).
 import path from 'node:path';
-import { appendAudit } from '@security/audit';
-import { basePath, registryRealmsDir, replicaLayout } from '@core/paths';
+import { basePath, replicaLayout } from '@core/paths';
 import {
-  addRealm,
   ensureLegacyRegistered,
   findByNameOrId,
   getCurrent,
   listRealms,
   readRegistry,
-  removeRealm,
-  setCurrent,
-  writeRegistry,
   type RealmRegistryEntry,
 } from '@core/realm-registry';
 import { openRealmLocal, resolveActiveReplicaRoot, isActiveRealmSilence } from '@core/runtime';
-import { readRealmConfig, writeRealmConfig } from '@core/realm';
+import { readRealmConfig } from '@core/realm';
 import { ask, getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 import { confirm } from './forget';
-import { createReplicaAtRoot } from './init';
+import { createRealm, deleteRealm, removalSafety, renameRealm, setActiveRealm, RealmActionError } from '../realm-actions';
 
 export async function cmdRealm(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
@@ -53,29 +49,20 @@ async function cmdRealmNew(flags: ReturnType<typeof parseFlags>): Promise<number
   }
   const base = basePath();
   ensureLegacyRegistered(base);
-  if (listRealms(base).some((r) => r.name === name)) {
-    console.error(`  A Realm named ${name} already exists. Use a unique name.`);
-    return 1;
-  }
   const usePassphrase = flags.passphrase === true || typeof flags.passphrase === 'string';
   const passphrase = usePassphrase ? await collectPassphrase() : undefined;
   if (usePassphrase && !passphrase) return 1;
 
-  const root = nextRealmRoot(name, base);
-  const created = createReplicaAtRoot({
-    root,
-    name,
-    usePassphrase,
-    passphrase,
-  });
-  addRealm({
-    name: created.config.name,
-    realm_id: created.config.realm_id,
-    root: created.layout.root,
-    created_at: created.config.created_at,
-    key_mode: created.keyMode,
-  }, base);
-  setCurrent(created.config.realm_id, base);
+  let created;
+  try {
+    created = createRealm({ name, usePassphrase, passphrase, base });
+  } catch (e) {
+    if (e instanceof RealmActionError) {
+      console.error(`  ${e.message}`);
+      return 1;
+    }
+    throw e;
+  }
 
   console.log(`  Created Realm ${created.config.name}.`);
   console.log(`  Realm    : ${created.config.realm_id}`);
@@ -120,8 +107,7 @@ async function cmdRealmUse(flags: ReturnType<typeof parseFlags>): Promise<number
   }
   const base = basePath();
   ensureLegacyRegistered(base);
-  const realm = findByNameOrId(query, base);
-  setCurrent(realm.realm_id, base);
+  const realm = setActiveRealm(query, base);
   console.log(`  Current Realm: ${realm.name} (${realm.realm_id})`);
   return 0;
 }
@@ -160,21 +146,17 @@ async function cmdRealmRename(flags: ReturnType<typeof parseFlags>): Promise<num
   }
   const base = basePath();
   ensureLegacyRegistered(base);
-  const registry = readRegistry(base);
-  const realm = findByNameOrId(query, base);
-  const collision = registry.realms.find((r) => r.name === newName && r.realm_id !== realm.realm_id);
-  if (collision) {
-    console.error(`  A Realm named ${newName} already exists (${collision.realm_id}).`);
-    return 1;
+  let result;
+  try {
+    result = renameRealm(query, newName, base);
+  } catch (e) {
+    if (e instanceof RealmActionError) {
+      console.error(`  ${e.message}`);
+      return 1;
+    }
+    throw e;
   }
-  const configPath = replicaLayout(realm.root).realmToml;
-  const config = readRealmConfig(configPath);
-  writeRealmConfig(configPath, { ...config, name: newName });
-  writeRegistry({
-    ...registry,
-    realms: registry.realms.map((r) => (r.realm_id === realm.realm_id ? { ...r, name: newName } : r)),
-  }, base);
-  console.log(`  Renamed Realm ${realm.realm_id}: ${realm.name} -> ${newName}`);
+  console.log(`  Renamed Realm ${result.realm.realm_id}: ${result.previousName} -> ${newName}`);
   return 0;
 }
 
@@ -199,19 +181,11 @@ async function cmdRealmRm(flags: ReturnType<typeof parseFlags>): Promise<number>
   }
   if (!(await confirm(flags, `remove Realm ${realm.name} (${realm.realm_id}) and delete its directory`))) return 1;
 
-  // Delete the on-disk replica FIRST, then drop the registry entry, then audit.
-  // This ordering keeps the Realm removable across a crash: dying after rmSync but
-  // before removeRealm leaves the entry resolvable, so `realm rm` re-runs
-  // idempotently (rmSync force-ignores the now-missing dir). The earlier
-  // registry-first order could orphan a directory of secret material (encrypted
-  // blob + keys) with no registry entry and no CLI recovery path. Auditing only
-  // after success keeps the log from asserting a removal that did not happen.
-  fs.rmSync(realm.root, { recursive: true, force: true });
-  removeRealm(realm.realm_id, base);
-  appendAudit(path.join(base, 'logs'), 'realm_rm', { realm_id: realm.realm_id }, new Date().toISOString());
-
-  console.log(`  Removed Realm ${realm.name} (${realm.realm_id}).`);
-  const current = getCurrent(base);
+  // The shared orchestrator deletes the on-disk replica FIRST, then drops the
+  // registry entry, then audits — keeping the Realm re-removable across a crash
+  // and never orphaning secret material (see realm-actions.deleteRealm).
+  const { removed, current } = deleteRealm(realm.realm_id, base);
+  console.log(`  Removed Realm ${removed.name} (${removed.realm_id}).`);
   if (current) console.log(`  Current Realm: ${current.name} (${current.realm_id})`);
   return 0;
 }
@@ -230,23 +204,6 @@ async function collectPassphrase(): Promise<string | undefined> {
     return undefined;
   }
   return passphrase;
-}
-
-function nextRealmRoot(name: string, base: string): string {
-  const dir = registryRealmsDir(base);
-  const baseSlug = slugify(name);
-  let slug = baseSlug;
-  let i = 2;
-  while (fs.existsSync(path.join(dir, slug))) {
-    slug = `${baseSlug}-${i}`;
-    i += 1;
-  }
-  return path.join(dir, slug);
-}
-
-function slugify(name: string): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  return slug || 'realm';
 }
 
 function statsFor(realm: RealmRegistryEntry): string {
@@ -277,30 +234,4 @@ function entryForRoot(root: string, base: string): RealmRegistryEntry | undefine
   } catch {
     return undefined;
   }
-}
-
-/** Resolve symlinks so the containment guard reflects the true on-disk target;
- *  fall back to a lexical resolve when the path does not exist yet. Without this a
- *  symlinked Realm root pointing at the base or another Realm would slip past the
- *  guard (rmSync would still only unlink the symlink, but the guard should not be
- *  silently inert). */
-function canonical(p: string): string {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return path.resolve(p);
-  }
-}
-
-function removalSafety(realm: RealmRegistryEntry, realms: RealmRegistryEntry[], base: string): string | undefined {
-  const root = canonical(realm.root);
-  if (containsOrEqual(root, canonical(base))) return 'the Realm root contains the registry base';
-  const other = realms.find((r) => r.realm_id !== realm.realm_id && containsOrEqual(root, canonical(r.root)));
-  if (other) return `the Realm root contains another registered Realm (${other.realm_id})`;
-  return undefined;
-}
-
-function containsOrEqual(parent: string, child: string): boolean {
-  const rel = path.relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }

@@ -2,16 +2,11 @@
 // sources, NOT one lump), and let the user choose include/exclude + Realm
 // assignment (FR-001..006, gate 12). Whole-tool watch is never the default:
 // nothing is captured unless a source is explicitly selected.
-import path from 'node:path';
-import { newId } from '@core/schema/ids';
-import { SCHEMA_VERSION } from '@core/schema/versions';
 import { isActiveRealmSilence, openResolvedRealm } from '@core/runtime';
-import { writeRealmConfig, type RealmConnectorConfig, type RealmProjectConfig } from '@core/realm';
 import { getConnector } from '@intake/registry';
-import { sourceIdentity } from '@intake/identity';
+import { connectSources, projectNameFor } from '@intake/connect-sources';
 import { runLoop, type LoopStats } from '@core/loop';
 import type { Connector, DetectedSource } from '@intake/types';
-import type { ConnectorInstance, Project, Source } from '@core/schema/entities';
 import { log } from '@core/log';
 import { ask, getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
@@ -38,11 +33,6 @@ async function chooseSources(sources: DetectedSource[], flags: ReturnType<typeof
   if (answer.trim() === 'all') return sources;
   const idx = answer.split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n));
   return idx.map((i) => sources[i]).filter((s): s is DetectedSource => Boolean(s));
-}
-
-function projectNameFor(source: DetectedSource): { name: string; root: string | null } {
-  if (source.project_root) return { name: path.basename(source.project_root), root: source.project_root };
-  return { name: 'unscoped', root: null };
 }
 
 type DeclaredSensitivity = 'public' | 'internal' | 'confidential' | undefined;
@@ -100,74 +90,10 @@ export async function cmdConnect(argv: string[]): Promise<number> {
     // `unknown` (Silence) until the user declares one.
     const defaultSensitivity = await resolveDefaultSensitivity(flags);
 
-    const ci: ConnectorInstance = {
-      connector_instance_id: newId('connectorInstance'),
-      realm_id: ctx.realmId,
-      connector_id: connectorId,
-      config_ref: 'connectors/' + connectorId,
-      schema_version: SCHEMA_VERSION.connectorInstance,
-    };
-    const sourceStableIds: string[] = [];
-
-    // Group selected sources into projects by project_root.
-    const projectByRoot = new Map<string, RealmProjectConfig>();
-    for (const existing of ctx.config.projects) {
-      for (const r of existing.root_paths) projectByRoot.set(r, existing);
-      if (existing.root_paths.length === 0) projectByRoot.set(`__name__:${existing.name}`, existing);
-    }
-
-    for (const src of selected) {
-      const { name, root } = projectNameFor(src);
-      const rootKey = root ?? `__name__:${name}`;
-      let projectCfg = projectByRoot.get(rootKey);
-      if (!projectCfg) {
-        const project: Project = {
-          project_id: newId('project'),
-          realm_id: ctx.realmId,
-          name,
-          root_paths: root ? [root] : [],
-          git_remotes: src.git_remote ? [src.git_remote] : [],
-          schema_version: SCHEMA_VERSION.project,
-        };
-        ctx.store.putProject(project);
-        projectCfg = {
-          project_id: project.project_id,
-          name,
-          root_paths: project.root_paths,
-          git_remotes: project.git_remotes,
-          // Only record the policy when explicitly declared (omit otherwise).
-          ...(defaultSensitivity ? { default_sensitivity: defaultSensitivity } : {}),
-        };
-        ctx.config.projects.push(projectCfg);
-        projectByRoot.set(rootKey, projectCfg);
-      }
-
-      const source: Source = {
-        source_id: newId('source'),
-        realm_id: ctx.realmId,
-        source_stable_key_hmac: sourceIdentity(ctx.realmKey, connectorId, src.source_stable_id),
-        source_stable_id: src.source_stable_id,
-        connector_id: connectorId,
-        connector_instance_id: ci.connector_instance_id,
-        source_type: src.source_type,
-        schema_version: SCHEMA_VERSION.source,
-      };
-      ctx.store.putSource(source);
-      ctx.store.setMeta(`source_project:${source.source_id}`, projectCfg.project_id);
-      sourceStableIds.push(src.source_stable_id);
-    }
-
-    ctx.store.putConnectorInstance(ci);
-    const connCfg: RealmConnectorConfig = {
-      connector_instance_id: ci.connector_instance_id,
-      connector_id: connectorId,
-      source_stable_ids: sourceStableIds,
-    };
-    ctx.config.connectors.push(connCfg);
-    writeRealmConfig(ctx.layout.realmToml, ctx.config);
+    const { sources: connected } = connectSources(ctx, connectorId, selected, defaultSensitivity);
     ctx.flush();
 
-    console.log(`  Connected ${sourceStableIds.length} source(s) to realm ${ctx.realmId}.`);
+    console.log(`  Connected ${connected} source(s) to realm ${ctx.realmId}.`);
     console.log('  Whole-tool watch is NOT enabled; only the selected sources are tracked.');
 
     if (flags.backfill === true) {
