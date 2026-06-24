@@ -6,6 +6,7 @@ import type { RealmContext } from '@core/runtime';
 import type { Claim } from '@core/schema/entities';
 import { normalizeLabel } from '@core/label-normalize';
 import { PRUNE_RECIPE } from '@core/recipe';
+import { importClaimMetaKey } from '@integrations/import-ai/index';
 import { readClaimStatement } from './extractor';
 import { initialReinforcement } from './lifecycle';
 import { validateClaim } from './validator';
@@ -87,6 +88,11 @@ export function consolidatePending(ctx: RealmContext, now = new Date()): Consoli
 
   const outcomes: ConsolidateOutcome[] = [];
   for (const c of candidates) {
+    // Imported candidates (ADR-0007) are non-authoritative foreign-AI content: they
+    // never auto-consolidate AND must not be auto-rejected — they wait, durably, for
+    // an explicit `memoring import promote`. This marker is where the loop's automatic
+    // authority machinery is held back for imported content.
+    if (ctx.store.getMeta(importClaimMetaKey(c.claim_id)) !== undefined) continue;
     const statement = readClaimStatement(ctx, c);
     const isDuplicate = canonical.some(
       (k) =>

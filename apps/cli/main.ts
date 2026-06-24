@@ -17,6 +17,7 @@ import { cmdRestore } from './commands/restore';
 import { cmdMcp } from './commands/mcp';
 import { cmdRekey } from './commands/rekey';
 import { cmdRealm } from './commands/realm';
+import { cmdImport } from './commands/import';
 import { versionLine } from '@core/version';
 
 const HELP = `Memoring — Sovereign Memory Loop (v0)
@@ -37,6 +38,16 @@ Usage:
       --all | --source <id>              Selection (no whole-tool default).
       --default-sensitivity <s>          public|internal|confidential (project policy; default internal).
       --backfill                         Run the loop after connecting.
+  memoring import [provider] [opts]      Import a pasted foreign-AI export (ChatGPT/Claude/Gemini)
+                                          into the active Realm as NON-authoritative candidates.
+      --file <path> | --text <s> | stdin  Source of the pasted export (default: stdin).
+      --default-sensitivity <s>          public|internal|confidential (else candidates stay unknown).
+      --dry-run                          Show the parsed entry Inventory; persist nothing.
+      --realm <id>                       Target Realm.
+      list                               List imported candidates awaiting review.
+      promote <id> --scope <label> [--sensitivity <s>]   Confirm a candidate (USER authority) → recallable.
+      reject <id>                        Drop a candidate from review.
+      --print-prompt <provider>          Print the export prompt to run in claude|gemini|chatgpt.
   memoring backfill                      Ingest history from registered sources (runs the loop).
   memoring watch                         Resident diff-driven loop; holds the key/lock only per diff.
   memoring context build [opts]          Generate .memoring/context.md through the Gate (main exit).
@@ -90,6 +101,8 @@ async function main(): Promise<number> {
       return cmdRealm(rest);
     case 'connect':
       return cmdConnect(rest);
+    case 'import':
+      return cmdImport(rest);
     case 'backfill':
       return cmdBackfill(rest);
     case 'context':

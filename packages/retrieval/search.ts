@@ -78,6 +78,12 @@ function claimLabelIds(ctx: RealmContext, claim: Claim): string[] {
     if (!e) continue;
     for (const a of ctx.store.listAssignmentsForTarget('event', e.event_id)) a.label_ids.forEach((l) => ids.add(l));
   }
+  // Fallback for an evidence-less claim (a promoted import, ADR-0007): use the
+  // claim's OWN explicit_user scope Assignment. No-op for evidence-backed claims —
+  // they already resolve labels from their evidence above.
+  if (ids.size === 0) {
+    for (const a of ctx.store.listAssignmentsForTarget('claim', claim.claim_id)) a.label_ids.forEach((l) => ids.add(l));
+  }
   return [...ids];
 }
 
@@ -87,6 +93,9 @@ function claimScopeState(ctx: RealmContext, claim: Claim): ClassificationState |
     const e = ctx.store.findEventByIdentity(ctx.realmId, eid);
     if (!e) continue;
     for (const a of ctx.store.listAssignmentsForTarget('event', e.event_id)) states.push(a.classification_state);
+  }
+  if (states.length === 0) {
+    for (const a of ctx.store.listAssignmentsForTarget('claim', claim.claim_id)) states.push(a.classification_state);
   }
   return bestClassificationState(states);
 }

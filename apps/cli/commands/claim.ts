@@ -49,8 +49,14 @@ export async function cmdClaim(argv: string[]): Promise<number> {
   }
 }
 
-function claimListStatement(ctx: RealmContext, claim: Claim): string {
+export function claimListStatement(ctx: RealmContext, claim: Claim): string {
   if (claim.status === 'redacted') return '[redacted]';
+  // Only `consolidated` claims are Gate-cleared, recallable output. A non-consolidated
+  // claim — candidate (incl. an imported one carrying a declared sensitivity),
+  // superseded, or rejected — is not authorized output and must not print its raw
+  // statement on this egress surface (ADR-0007 §3: imported content is inert until a
+  // human promotes it).
+  if (claim.status !== 'consolidated') return `[suppressed:${claim.status}]`;
   if (claim.sensitivity === 'secret' || claim.sensitivity === 'unknown' || claim.sensitivity === 'confidential') {
     return `[suppressed:${claim.sensitivity}]`;
   }
