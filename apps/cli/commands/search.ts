@@ -1,13 +1,13 @@
 // `memoring search <query>` — exact / FTS / n-gram fallback over the encrypted
 // index. Locked Realm / unclassified / out-of-scope / secret never appear
 // (FR-040..042). Not the lead command; `context build` is.
-import { replicaLayout } from '@core/paths';
-import { openActiveRealm } from '@core/runtime';
+import { isActiveRealmSilence, openResolvedRealm } from '@core/runtime';
 import { resolveActiveProjects } from '@core/realm';
 import { searchRealm } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import { printActiveRealmSilence } from './resolve';
 
 export async function cmdSearch(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
@@ -16,7 +16,9 @@ export async function cmdSearch(argv: string[]): Promise<number> {
     console.error('Usage: memoring search <query> [--scope <label>] [--project <id>]');
     return 1;
   }
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
+  const ctx = opened;
   try {
     // Search is scope-gated and fails closed: if the active scope cannot be
     // resolved, Silence (do not fall open to a Realm-wide search) — mirrors

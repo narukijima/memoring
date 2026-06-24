@@ -6,8 +6,7 @@
 // next diff.
 import fs from 'node:fs';
 import path from 'node:path';
-import { replicaLayout } from '@core/paths';
-import { openActiveRealm, type RealmContext } from '@core/runtime';
+import { isActiveRealmSilence, openActiveRealm, resolveActiveReplicaRoot, type RealmContext } from '@core/runtime';
 import { getConnector } from '@intake/registry';
 import { runLoop, type LoopStats } from '@core/loop';
 import { log } from '@core/log';
@@ -41,10 +40,21 @@ function printStats(stats: LoopStats): void {
 }
 
 export async function cmdWatch(argv: string[]): Promise<number> {
-  parseFlags(argv);
+  const flags = parseFlags(argv);
   const debounceMs = 600;
 
-  const root = replicaLayout().root;
+  const resolved = resolveActiveReplicaRoot({
+    flags,
+    cwd: process.cwd(),
+    commandClass: 'recall',
+    explicitOnly: true,
+  });
+  if (isActiveRealmSilence(resolved)) {
+    console.error(`  ${resolved.silence}.`);
+    console.error('  Start watch with --realm <id|name>, or point MEMORING_HOME directly at a replica.');
+    return 1;
+  }
+  const root = resolved;
 
   // The daemon holds the replica lock ONLY for the duration of a tick (open →
   // loop → close), never continuously. This keeps context build / search /

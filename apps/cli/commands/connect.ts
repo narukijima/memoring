@@ -5,8 +5,7 @@
 import path from 'node:path';
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
-import { replicaLayout } from '@core/paths';
-import { openActiveRealm } from '@core/runtime';
+import { isActiveRealmSilence, openResolvedRealm } from '@core/runtime';
 import { writeRealmConfig, type RealmConnectorConfig, type RealmProjectConfig } from '@core/realm';
 import { getConnector } from '@intake/registry';
 import { sourceIdentity } from '@intake/identity';
@@ -17,6 +16,7 @@ import { log } from '@core/log';
 import { ask, getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 import { resolveProvider } from '../provider';
+import { printActiveRealmSilence } from './resolve';
 
 function normalizeConnectorId(raw: string | undefined): string {
   return (raw ?? 'claude-code').replace(/-/g, '_');
@@ -71,7 +71,9 @@ export async function cmdConnect(argv: string[]): Promise<number> {
     return 1;
   }
 
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
+  const ctx = opened;
   try {
     const detection = await connector.detect();
     console.log(`  ${connector.displayName}: detected ${detection.sources.length} source(s).`);

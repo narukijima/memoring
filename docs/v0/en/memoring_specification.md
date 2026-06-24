@@ -17,9 +17,10 @@ The CLI is the primary operating surface of v0. The center of user operation is 
 | Command | Main arguments / options | Default | Behavior |
 | --- | --- | --- | --- |
 | `memoring init` | (none) | Mandatory generation of passphrase / recovery material | Creates a local encrypted replica and initializes `~/.memoring/`. In environments where the OS keychain is available, use the keychain; in headless / container / WSL, use a passphrase-based file-based encrypted key bundle. Auto-detects Connectors and displays the Inventory, and the user selects sources and assigns them to a Realm. Backfill is OFF by default (watch only first). Finally, validates with doctor. |
+| `memoring realm` | `new <name>` / `list [--stats]` / `use <name\|id>` / `current` / `rename <name\|id> <newName>` / `rm <name\|id> --yes` | Local registry | Manages multiple local Realms through `<base>/realms.toml` (`base = MEMORING_HOME ?? ~/.memoring`). The registry stores plaintext metadata only (name, realm_id, root, created_at, key mode) and never stores secrets or payload. New Realms are created under `<base>/realms/<slug>/`, registered, and made current. `realm rm` is destructive, audited, refuses the last Realm, and never removes a root that contains the registry base or another registered Realm. |
 | `memoring connect <connector>` | `claude-code` / `codex` / `manual <dir>` etc. / `--backfill` / `--dry-run` | Backfill OFF by default | Performs `detect`, displays the Inventory (enumeration of discovered sources), and lets the user choose include / exclude and the Realm assignment of each source (corresponds to Final Design §10 “Intake and Retrieval”). Does not assign the entire host tool as a single block. `connect` is re-runnable (re-detects the Inventory). `--backfill --dry-run` outputs the Inventory, Realm, sensitivity hint, and sample count, and executes only after confirmation. |
 | `memoring backfill` | `--since <t>` / `--dry-run` | OFF by default | Provides the path for ingesting past logs. `--dry-run` only outputs the Inventory, Realm, sensitivity hint, and sample count, and executes after confirmation. |
-| `memoring watch` | (none) | Selected sources only | Watches only the sources selected in configure. Does not make watching the entire tool the default. When operating multiple Realms, watch, key bundle, index, and daemon scope are separated per Realm. |
+| `memoring watch` | `--realm <id\|name>` | Selected sources only | Watches only the sources selected in configure. Does not make watching the entire tool the default. When operating multiple Realms, watch, key bundle, index, and daemon scope are separated per Realm. A long-running watch/daemon binds one explicit Realm at launch (`--realm` or direct `MEMORING_HOME`) and refuses CWD/current inference. |
 | `memoring context build` | `--out <path>` (default `.memoring/context.md`) / `--realm <id>` / `--scope <label>` / `--project <id>` / `--aperture <strict\|standard\|permissive>` | Audience = ai_tool, Aperture = standard, `--out` = `.memoring/context.md` | The main exit. Generates a ContextPack and writes it to context.md. When `--realm` is omitted, resolves and uses the Active Realm. For the active scope, uses `--scope` / `--project` if explicitly given; otherwise resolves it from the CWD (the canonical source of the resolution rule is Detailed Design §3.4). When the Active Realm or active scope cannot be uniquely determined, Silence (does not emit context.md). Output passes through the Gate (Audience × Aperture); secret / unknown / unclassified (classified=false) / out-of-scope are not emitted. |
 | `memoring search <query>` | `--realm <id>` | Active Realm | Searches by exact / FTS / n-gram fallback / metadata filter / session reconstruction. For Japanese / CJK, exact and n-gram fallback are always provided. Locked Realm / unclassified (classified=false) / out-of-scope do not enter the search candidates. |
 | `memoring forget` | `<claim_id>` / `--pattern "<pattern>"` | — | Executes delete / redact and generates a SealRule (does not let it revive on reprocess / re-capture). Because it is a destructive operation, it requires explicit confirmation. |
@@ -239,7 +240,13 @@ The default Realm is placed in `~/.memoring/` as a local replica.
 
 `realm.toml` holds the Realm's composition (registered root_paths / git_remotes, references to Connector settings, etc.). Active Realm resolution is based on this registration information. `memoring.db` at-rest encrypts the entire DB. The index in `indexes/` is also at-rest encrypted; no plaintext index is placed on persistent disk.
 
-When operating multiple Realms, run `memoring init` separately per Realm, with separate directories and separate keys. watch, key bundle, index, and daemon scope are separated per Realm.
+For multi-Realm operation, Memoring keeps a local plaintext registry at `<base>/realms.toml`
+(`base = MEMORING_HOME ?? ~/.memoring`, mode `0700`; registry mode `0600`). The registry stores
+only `{ name, realm_id, root, created_at, key_mode }` plus a `current` pointer for management
+commands. New Realms created by `memoring realm new` live under `<base>/realms/<slug>/`. The
+per-Realm `realm.toml` remains authoritative for projects, root_paths, git_remotes, connectors, and
+the Realm name. A legacy direct replica at `<base>/realm.toml` remains valid and is lazily registered
+as `default` without moving data. watch, key bundle, index, and daemon scope are separated per Realm.
 
 ### 5.2 policy precedence (priority order)
 
@@ -564,8 +571,14 @@ Cross-Realm prohibited:
   Realms are by design not connected. Boundaries that are troublesome if mixed are made separate Realms (separate directory, separate key).
 
 Silence when Active Realm is unresolved:
-  When the Active Realm cannot be uniquely determined from the CWD, do not mix by guessing and do not emit context.md.
-  Have the user specify it explicitly with --realm <id>, or do not emit output.
+  Recall/data commands resolve in this order: --realm <id|name>, direct base replica
+  (a `<base>/realm.toml` only while it is the sole registered Realm — legacy single-replica
+  back-compat), unique CWD match across registered Realms' realm.toml projects[].root_paths/git_remotes,
+  else Silence. Once a second Realm is registered the direct-base tier is skipped so CWD matching
+  decides. Do not fall back to the registry current pointer for recall/data commands.
+  Management commands may use the registry current pointer. When the Active Realm cannot be uniquely
+  determined, do not mix by guessing and do not emit context.md/search/context output. Have the user
+  specify it explicitly with --realm <id|name>, or do not emit output.
 
 event-level sensitivity:
   Even a tool output with only one line mixed with secret makes the entire event secret.

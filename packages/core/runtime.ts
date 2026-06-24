@@ -15,8 +15,9 @@ import {
 } from '@security/key-lifecycle';
 import { appendAudit, type AuditFields } from '@security/audit';
 import { Chronicler } from './chronicle';
-import { type RealmConfig, readRealmConfig } from './realm';
-import { type ReplicaLayout, replicaLayout } from './paths';
+import { readRegistry, ensureLegacyRegistered, findByNameOrId, getCurrent } from './realm-registry';
+import { resolveActiveRealmByCwd, type RealmConfig, readRealmConfig } from './realm';
+import { basePath, type ReplicaLayout, replicaLayout } from './paths';
 
 export class ReplicaNotFoundError extends Error {
   constructor(root: string) {
@@ -143,4 +144,109 @@ export async function openActiveRealm(
 /** Build a RealmContext from an already-unlocked keyring (used right after init). */
 export function attachRealm(layout: ReplicaLayout, config: RealmConfig, keyring: Keyring): RealmContext {
   return buildContext(layout, config, keyring);
+}
+
+export type CommandClass = 'recall' | 'mgmt';
+
+export interface ResolveActiveReplicaRootOptions {
+  flags?: Record<string, unknown>;
+  cwd: string;
+  commandClass: CommandClass;
+  explicitOnly?: boolean;
+  base?: string;
+}
+
+export interface ActiveRealmSilence {
+  silence: string;
+}
+
+export function isActiveRealmSilence(value: unknown): value is ActiveRealmSilence {
+  return Boolean(value && typeof value === 'object' && 'silence' in value);
+}
+
+export function resolveActiveReplicaRoot(opts: ResolveActiveReplicaRootOptions): string | ActiveRealmSilence {
+  const base = opts.base ?? basePath();
+  const explicitRealm = realmFlag(opts.flags);
+
+  if (explicitRealm) {
+    try {
+      const found = resolveExplicitRealm(base, explicitRealm);
+      return found ?? { silence: `Active Realm unresolved: no Realm matches ${explicitRealm}` };
+    } catch (e) {
+      return { silence: `Active Realm unresolved: ${(e as Error).message}` };
+    }
+  }
+
+  if (replicaExists(base)) {
+    ensureLegacyRegistered(base);
+    // A direct replica at base short-circuits ONLY while it is the sole Realm
+    // (legacy single-replica back-compat). Once other Realms are registered, fall
+    // through to CWD matching (recall) / the `current` pointer (mgmt) so §6.5
+    // switching actually engages — otherwise the base replica would swallow every
+    // resolution and `realm use` / CWD switching would never take effect.
+    const onlyBaseRealm = (() => {
+      try {
+        return readRegistry(base).realms.length <= 1;
+      } catch {
+        return true;
+      }
+    })();
+    if (onlyBaseRealm) return base;
+  }
+
+  if (opts.explicitOnly) {
+    return { silence: 'Active Realm unresolved: watch/daemon requires --realm or MEMORING_HOME pointing at a replica' };
+  }
+
+  if (opts.commandClass === 'mgmt') {
+    try {
+      const current = getCurrent(base);
+      return current?.root ?? { silence: 'Active Realm unresolved: no current Realm is set' };
+    } catch (e) {
+      return { silence: `Active Realm unresolved: ${(e as Error).message}` };
+    }
+  }
+
+  try {
+    const registry = readRegistry(base);
+    const resolved = resolveActiveRealmByCwd(registry.realms, opts.cwd);
+    return resolved.kind === 'resolved' ? resolved.root : { silence: resolved.reason };
+  } catch (e) {
+    return { silence: `Active Realm unresolved: ${(e as Error).message}` };
+  }
+}
+
+export async function openResolvedRealm(
+  flags: Record<string, unknown> | undefined,
+  passphraseProvider: () => Promise<string>,
+  commandClass: CommandClass = 'recall',
+): Promise<RealmContext | ActiveRealmSilence> {
+  const resolved = resolveActiveReplicaRoot({
+    flags,
+    cwd: process.cwd(),
+    commandClass,
+  });
+  if (isActiveRealmSilence(resolved)) return resolved;
+  return openActiveRealm(resolved, passphraseProvider);
+}
+
+function resolveExplicitRealm(base: string, query: string): string | undefined {
+  ensureLegacyRegistered(base);
+  try {
+    return findByNameOrId(query, base).root;
+  } catch (e) {
+    if (e instanceof Error && e.name === 'DuplicateRealmNameError') throw e;
+    return directRootIfMatches(base, query);
+  }
+}
+
+function directRootIfMatches(root: string, query: string): string | undefined {
+  if (!replicaExists(root)) return undefined;
+  const config = readRealmConfig(replicaLayout(root).realmToml);
+  return query === config.realm_id || query === config.name ? root : undefined;
+}
+
+function realmFlag(flags?: Record<string, unknown>): string | undefined {
+  const raw = flags?.realm;
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
 }

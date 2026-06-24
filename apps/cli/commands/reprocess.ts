@@ -2,18 +2,20 @@
 // current Parser. event_identity is rotation/blob-invariant, so reprocessing
 // produces no duplicate Events and never leaves Claim evidence dangling (G11);
 // candidates matching an active SealRule do not revive (§4.15).
-import { replicaLayout } from '@core/paths';
-import { openActiveRealm, type RealmContext } from '@core/runtime';
+import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { normalizeOccurrence } from '@intake/normalize';
 import { getConnector } from '@intake/registry';
 import { indexEvent } from '@retrieval/search';
 import { classifyEvent } from '@claim/classify';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import { printActiveRealmSilence } from './resolve';
 
 export async function cmdReprocess(argv: string[]): Promise<number> {
-  parseFlags(argv); // --parser reserved (v0 has a single parser version per connector)
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const flags = parseFlags(argv); // --parser reserved (v0 has a single parser version per connector)
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
+  const ctx = opened;
   try {
     let reEvents = 0;
     let occurrences = 0;

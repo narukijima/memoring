@@ -2,9 +2,8 @@
 // (FR-064). pin strengthens reinforcement; correct edits the statement WITHOUT
 // lowering sensitivity (no AI Declassify, G9); expire supersedes (drops from
 // active recall).
-import { replicaLayout } from '@core/paths';
 import { normalizeLabel } from '@core/label-normalize';
-import { openActiveRealm, type RealmContext } from '@core/runtime';
+import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { newId } from '@core/schema/ids';
 import { reinforcement } from '@claim/lifecycle';
 import { claimKeyMeta, readClaimStatement } from '@claim/extractor';
@@ -13,11 +12,14 @@ import { scanText } from '@security/secret-scan';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 import type { Claim } from '@core/schema/entities';
+import { printActiveRealmSilence } from './resolve';
 
 export async function cmdClaim(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const sub = flags._[0];
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
+  const ctx = opened;
   let dirty = true;
   try {
     switch (sub) {

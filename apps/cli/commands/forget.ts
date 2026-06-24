@@ -1,8 +1,7 @@
 // Reactive governance — destructive operations (FR-064..073, gate 10). The user
 // governs after the fact; these are the only irreversible operations and require
 // explicit confirmation (Specification §8.2).
-import { replicaLayout } from '@core/paths';
-import { openActiveRealm, type RealmContext } from '@core/runtime';
+import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import {
   deleteUndiluted,
   forgetByPattern,
@@ -12,8 +11,9 @@ import {
 } from '@security/redaction';
 import { ask, getPassphrase } from '../prompt';
 import { parseFlags, type Flags } from '../args';
+import { printActiveRealmSilence } from './resolve';
 
-async function confirm(flags: Flags, what: string): Promise<boolean> {
+export async function confirm(flags: Flags, what: string): Promise<boolean> {
   if (flags.yes === true) return true;
   if (process.env.MEMORING_PASSPHRASE) {
     console.error(`Refusing destructive op without --yes (headless): ${what}`);
@@ -23,12 +23,16 @@ async function confirm(flags: Flags, what: string): Promise<boolean> {
   return a.trim() === 'yes';
 }
 
-async function withRealm<T>(fn: (ctx: RealmContext) => T): Promise<T> {
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+type WithRealmResult<T> = { kind: 'value'; value: T } | { kind: 'exit'; code: number };
+
+async function withRealm<T>(flags: Flags, fn: (ctx: RealmContext) => T): Promise<WithRealmResult<T>> {
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return { kind: 'exit', code: printActiveRealmSilence(opened) };
+  const ctx = opened;
   try {
     const r = fn(ctx);
     ctx.flush();
-    return r;
+    return { kind: 'value', value: r };
   } finally {
     ctx.close(true);
   }
@@ -38,8 +42,9 @@ export async function cmdForget(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   if (typeof flags.pattern === 'string') {
     if (!(await confirm(flags, `forget all claims matching /${flags.pattern}/`))) return 1;
-    const n = await withRealm((ctx) => forgetByPattern(ctx, flags.pattern as string));
-    console.log(`  Forgot ${n} claim(s) and sealed the pattern.`);
+    const n = await withRealm(flags, (ctx) => forgetByPattern(ctx, flags.pattern as string));
+    if (n.kind === 'exit') return n.code;
+    console.log(`  Forgot ${n.value} claim(s) and sealed the pattern.`);
     return 0;
   }
   const id = flags._[0];
@@ -48,14 +53,15 @@ export async function cmdForget(argv: string[]): Promise<number> {
     return 1;
   }
   if (!(await confirm(flags, `forget ${id}`))) return 1;
-  const ok = await withRealm((ctx) => {
+  const ok = await withRealm(flags, (ctx) => {
     if (id.startsWith('clm_')) return forgetClaim(ctx, id, { seal: true });
     if (id.startsWith('evt_')) return redactEventById(ctx, id, { seal: true });
     if (id.startsWith('und_')) return deleteUndiluted(ctx, id, { seal: true }).found;
     return false;
   });
-  console.log(ok ? `  Forgot ${id} (sealed).` : `  Not found: ${id}`);
-  return ok ? 0 : 1;
+  if (ok.kind === 'exit') return ok.code;
+  console.log(ok.value ? `  Forgot ${id} (sealed).` : `  Not found: ${id}`);
+  return ok.value ? 0 : 1;
 }
 
 export async function cmdDelete(argv: string[]): Promise<number> {
@@ -66,14 +72,15 @@ export async function cmdDelete(argv: string[]): Promise<number> {
     return 1;
   }
   if (!(await confirm(flags, `delete ${id} and cascade`))) return 1;
-  const ok = await withRealm((ctx) => {
+  const ok = await withRealm(flags, (ctx) => {
     if (id.startsWith('und_')) return deleteUndiluted(ctx, id, { seal: false }).found;
     if (id.startsWith('evt_')) return redactEventById(ctx, id, { seal: false });
     if (id.startsWith('clm_')) return forgetClaim(ctx, id, { seal: false });
     return false;
   });
-  console.log(ok ? `  Deleted ${id} (cascaded).` : `  Not found: ${id}`);
-  return ok ? 0 : 1;
+  if (ok.kind === 'exit') return ok.code;
+  console.log(ok.value ? `  Deleted ${id} (cascaded).` : `  Not found: ${id}`);
+  return ok.value ? 0 : 1;
 }
 
 export async function cmdRedact(argv: string[]): Promise<number> {
@@ -84,19 +91,22 @@ export async function cmdRedact(argv: string[]): Promise<number> {
     return 1;
   }
   if (!(await confirm(flags, `redact ${id}`))) return 1;
-  const ok = await withRealm((ctx) => {
+  const ok = await withRealm(flags, (ctx) => {
     if (id.startsWith('evt_')) return redactEventById(ctx, id, { seal: false });
     if (id.startsWith('clm_')) return forgetClaim(ctx, id, { seal: false });
     return false;
   });
-  console.log(ok ? `  Redacted ${id}.` : `  Not found: ${id}`);
-  return ok ? 0 : 1;
+  if (ok.kind === 'exit') return ok.code;
+  console.log(ok.value ? `  Redacted ${id}.` : `  Not found: ${id}`);
+  return ok.value ? 0 : 1;
 }
 
 export async function cmdSuppress(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const sub = flags._[0];
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
+  const ctx = opened;
   try {
     if (sub === 'list') {
       const rules = ctx.store.listSealRules(ctx.realmId);

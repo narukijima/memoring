@@ -3,6 +3,22 @@
 All notable changes to Memoring — the frozen specification baseline and the v0 implementation
 built against it — are recorded here.
 
+## Unreleased — multi-Realm CLI
+
+- **First-class multi-Realm management.** Added `memoring realm new/list/use/current/rename/rm`
+  backed by a local plaintext registry (`realms.toml`) that stores only names/ids/roots/key mode.
+  New Realms are created under `<base>/realms/<slug>/`, registered, and made current; legacy direct
+  replicas at `<base>/realm.toml` remain valid and are lazily registered without moving data.
+- **Fail-closed active Realm resolution.** Recall/data commands resolve by `--realm`, then a direct
+  base replica (only while it is the sole Realm — legacy single-replica back-compat), then a unique
+  CWD match across registered Realms' `realm.toml` project roots/git remotes. Once a second Realm is
+  registered, a base replica no longer short-circuits, so `realm use`/CWD switching engages even on an
+  `init`-at-base layout. They do not fall back to sticky `current`; unresolved/ambiguous resolution
+  Silences. `watch` binds an explicit Realm at launch and refuses CWD/current inference.
+- **Safety boundaries preserved.** No cross-Realm search/context, no key/Gate identity changes, and
+  `realm rm` is confirmed, audited, refuses the last Realm, and avoids deleting roots that contain
+  the registry base or another Realm.
+
 ## 0.1.2 — passwordless by default
 
 - **Passwordless default; passphrase becomes opt-in.** `memoring init` now creates a passwordless

@@ -83,13 +83,49 @@ function cwdGitRemotes(cwd: string): string[] {
   return [];
 }
 
-/**
- * Active Realm resolution (§6.5). A replica holds one Realm, so resolution is
- * trivial unless an explicit --realm is given that does not match.
- */
-export function resolveActiveRealm(config: RealmConfig, explicitRealm?: string): string | 'silence' {
-  if (explicitRealm && explicitRealm !== config.realm_id) return 'silence';
-  return config.realm_id;
+function matchingProjectsForCwd(config: RealmConfig, cwdRaw: string): RealmProjectConfig[] {
+  const cwd = canonicalize(cwdRaw);
+  // §3.4 step 2: match the canonical CWD against Project.root_paths AND git_remotes.
+  // git_remotes are read (only when any project registers one) from the CWD's
+  // plaintext .git/config — resolution runs before unlock, so no DB access.
+  const anyRemotes = config.projects.some((p) => p.git_remotes.length > 0);
+  const remotes = anyRemotes ? new Set(cwdGitRemotes(cwdRaw)) : new Set<string>();
+  return config.projects.filter(
+    (p) =>
+      p.root_paths.some((root) => {
+        const r = canonicalize(root);
+        return cwd === r || cwd.startsWith(r + path.sep);
+      }) || p.git_remotes.some((g) => remotes.has(g)),
+  );
+}
+
+export interface ActiveRealmCandidate {
+  root: string;
+}
+
+export type ActiveRealmResolution =
+  | { kind: 'resolved'; root: string; realmId: string; config: RealmConfig }
+  | { kind: 'silence'; reason: string };
+
+export function resolveActiveRealmByCwd(candidates: ActiveRealmCandidate[], cwd: string): ActiveRealmResolution {
+  const matches: { root: string; config: RealmConfig }[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const realmToml = path.join(candidate.root, 'realm.toml');
+    if (!fs.existsSync(realmToml)) continue;
+    const config = readRealmConfig(realmToml);
+    if (seen.has(config.realm_id)) continue;
+    if (matchingProjectsForCwd(config, cwd).length > 0) {
+      matches.push({ root: candidate.root, config });
+      seen.add(config.realm_id);
+    }
+  }
+  if (matches.length === 1) {
+    const match = matches[0]!;
+    return { kind: 'resolved', root: match.root, realmId: match.config.realm_id, config: match.config };
+  }
+  if (matches.length === 0) return { kind: 'silence', reason: 'Active Realm unresolved: CWD matches no registered Realm' };
+  return { kind: 'silence', reason: 'Active Realm unresolved: CWD matches multiple registered Realms' };
 }
 
 export type ScopeResolution =
@@ -115,19 +151,7 @@ export function resolveActiveProjects(
     if (!match) return { kind: 'silence', reason: `No registered project matches --project ${opts.project}` };
     return { kind: 'resolved', projectIds: [match.project_id], basis: 'cli_project' };
   }
-  const cwd = canonicalize(opts.cwd);
-  // §3.4 step 2: match the canonical CWD against Project.root_paths AND git_remotes.
-  // git_remotes are read (only when any project registers one) from the CWD's
-  // plaintext .git/config — resolution runs before unlock, so no DB access.
-  const anyRemotes = config.projects.some((p) => p.git_remotes.length > 0);
-  const remotes = anyRemotes ? new Set(cwdGitRemotes(opts.cwd)) : new Set<string>();
-  const matches = config.projects.filter(
-    (p) =>
-      p.root_paths.some((root) => {
-        const r = canonicalize(root);
-        return cwd === r || cwd.startsWith(r + path.sep);
-      }) || p.git_remotes.some((g) => remotes.has(g)),
-  );
+  const matches = matchingProjectsForCwd(config, opts.cwd);
   if (matches.length === 1) {
     return { kind: 'resolved', projectIds: [matches[0]!.project_id], basis: 'cwd_project_match' };
   }

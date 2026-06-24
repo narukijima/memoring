@@ -3,13 +3,12 @@
 // Header and signed Ouroboros marker (gates 3–7, 13). Silence when the Active
 // Realm or active scope cannot be uniquely resolved (FR-055).
 import path from 'node:path';
-import { replicaLayout } from '@core/paths';
-import { openActiveRealm } from '@core/runtime';
-import { resolveActiveRealm } from '@core/realm';
+import { isActiveRealmSilence, openResolvedRealm } from '@core/runtime';
 import { buildContext } from '@retrieval/context-pack';
 import type { Aperture } from '@core/schema/enums';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
+import { printActiveRealmSilence } from './resolve';
 
 const VALID_APERTURES = new Set<Aperture>(['strict', 'standard', 'permissive']);
 
@@ -22,14 +21,10 @@ export async function cmdContextBuild(argv: string[]): Promise<number> {
     return 1;
   }
 
-  const ctx = await openActiveRealm(replicaLayout().root, getPassphrase);
+  const opened = await openResolvedRealm(flags, getPassphrase);
+  if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened, 2);
+  const ctx = opened;
   try {
-    const realm = resolveActiveRealm(ctx.config, flags.realm as string | undefined);
-    if (realm === 'silence') {
-      console.error('  Silence: could not resolve the Active Realm. Specify --realm <id>.');
-      return 2;
-    }
-
     const cwd = process.cwd();
     const outPath = (flags.out as string) ?? path.join('.memoring', 'context.md');
     const result = buildContext(ctx, {
