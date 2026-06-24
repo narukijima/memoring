@@ -27,7 +27,7 @@ export async function cmdBackfill(argv: string[]): Promise<number> {
       await previewBackfill(ctx);
       return 0;
     }
-    const stats = await runLoop(ctx, { method: 'backfill', provider: resolveProvider() });
+    const stats = await runLoop(ctx, { method: 'backfill', provider: resolveProvider(ctx.config.llm) });
     printLoopStats(stats);
     return 0;
   } finally {

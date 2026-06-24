@@ -28,6 +28,12 @@ export interface RealmConnectorConfig {
   source_stable_ids: string[];
 }
 
+export interface RealmLlmConfig {
+  base_url: string;
+  model: string;
+  egress?: 'local' | 'remote';
+}
+
 export interface RealmConfig {
   schema: 'realm.v1';
   realm_id: string;
@@ -35,10 +41,12 @@ export interface RealmConfig {
   created_at: string;
   projects: RealmProjectConfig[];
   connectors: RealmConnectorConfig[];
+  llm?: RealmLlmConfig;
 }
 
 export function readRealmConfig(realmTomlPath: string): RealmConfig {
   const raw = parseToml(fs.readFileSync(realmTomlPath, 'utf8')) as unknown as Partial<RealmConfig>;
+  const llm = normalizeLlmConfig(raw.llm);
   return {
     schema: 'realm.v1',
     realm_id: raw.realm_id!,
@@ -46,6 +54,7 @@ export function readRealmConfig(realmTomlPath: string): RealmConfig {
     created_at: raw.created_at!,
     projects: raw.projects ?? [],
     connectors: raw.connectors ?? [],
+    ...(llm ? { llm } : {}),
   };
 }
 
@@ -59,6 +68,22 @@ export function canonicalize(p: string): string {
   } catch {
     return path.resolve(p);
   }
+}
+
+function normalizeLlmConfig(raw: unknown): RealmLlmConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as Record<string, unknown>;
+  const baseUrl = value.base_url;
+  const model = value.model;
+  const egress = value.egress;
+  if (typeof baseUrl !== 'string' || baseUrl.length === 0 || typeof model !== 'string' || model.length === 0) {
+    return undefined;
+  }
+  return {
+    base_url: baseUrl,
+    model,
+    ...(egress === 'local' || egress === 'remote' ? { egress } : {}),
+  };
 }
 
 /** Read the CWD's git remote URLs from plaintext .git/config (no subprocess), for

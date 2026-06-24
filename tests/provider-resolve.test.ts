@@ -49,6 +49,63 @@ describe('resolveProvider (env-driven provider selection)', () => {
     expect(resolveProvider().egress).toBe('local');
   });
 
+  it('uses Realm-local LLM config when no env override is set', () => {
+    clearLlmEnv();
+    const p = resolveProvider({
+      base_url: 'http://127.0.0.1:11434/v1',
+      model: 'gemma4:latest',
+      egress: 'local',
+    });
+    expect(p).toBeInstanceOf(LlmMemoryProvider);
+    expect(p.egress).toBe('local');
+    expect(p.id).toBe('llm:openai_compatible:gemma4:latest');
+  });
+
+  it('lets env override the Realm-local model per invocation', () => {
+    clearLlmEnv();
+    process.env.MEMORING_LLM_MODEL = 'env-model';
+    const p = resolveProvider({
+      base_url: 'http://127.0.0.1:11434/v1',
+      model: 'realm-model',
+      egress: 'local',
+    });
+    expect(p).toBeInstanceOf(LlmMemoryProvider);
+    expect(p.id).toBe('llm:openai_compatible:env-model');
+  });
+
+  it('does not reuse Realm-local local egress when env overrides the base URL', () => {
+    clearLlmEnv();
+    process.env.MEMORING_LLM_BASE_URL = 'https://api.deepseek.com/v1';
+    const config = {
+      base_url: 'http://127.0.0.1:11434/v1',
+      model: 'realm-model',
+      egress: 'local' as const,
+    };
+
+    expect(resolveProvider(config)).toBeInstanceOf(RuleBasedProvider);
+
+    process.env.MEMORING_LLM_REMOTE_OPT_IN = '1';
+    const p = resolveProvider(config);
+    expect(p).toBeInstanceOf(LlmMemoryProvider);
+    expect(p.egress).toBe('remote');
+  });
+
+  it('does not trust Realm-local local egress for a non-loopback config URL', () => {
+    clearLlmEnv();
+    const config = {
+      base_url: 'https://api.deepseek.com/v1',
+      model: 'realm-model',
+      egress: 'local' as const,
+    };
+
+    expect(resolveProvider(config)).toBeInstanceOf(RuleBasedProvider);
+
+    process.env.MEMORING_LLM_REMOTE_OPT_IN = '1';
+    const p = resolveProvider(config);
+    expect(p).toBeInstanceOf(LlmMemoryProvider);
+    expect(p.egress).toBe('remote');
+  });
+
   it('falls back to rule-based (never a half-configured LLM) when the model is missing', () => {
     clearLlmEnv();
     process.env.MEMORING_LLM_BASE_URL = 'https://api.deepseek.com/v1';

@@ -14,12 +14,14 @@
 //
 // Per-role config (ADR-0011 §6): the output role reads its own MEMORING_ASK_*
 // namespace (BASE_URL / MODEL / API_KEY / EGRESS), falling back PER-VARIABLE to the
-// loop's MEMORING_LLM_* when unset, so ask/chat can use a different model than the
-// loop MemoryProvider. The remote opt-in gate is SHARED and unchanged
-// (MEMORING_LLM_REMOTE_OPT_IN); this split moves NO egress default.
+// loop's MEMORING_LLM_* and then Realm-local LLM config when unset, so ask/chat
+// can use a different model than the loop MemoryProvider. The remote opt-in gate
+// is SHARED and unchanged (MEMORING_LLM_REMOTE_OPT_IN); this split moves NO
+// egress default.
 import { OpenAiCompatibleBackend, isLoopback } from '@integrations/llm/openai-compatible';
 import type { LlmBackend } from '@claim/llm-provider';
 import { log } from '@core/log';
+import type { RealmLlmConfig } from '@core/realm';
 
 /** Output-layer role: turn a grounding prompt into prose. Distinct from
  *  MemoryProvider (which only `abstract()`s); never overloads it (ADR-0011 §6). */
@@ -51,16 +53,20 @@ export class LlmOutputProvider implements OutputProvider {
  * configured or a remote model is refused for lack of opt-in. The renderer never
  * falls back to a non-generative provider (no fabricated prose; ADR-0011 §5/§6).
  */
-export function resolveOutputProvider(): OutputProvider | null {
+export function resolveOutputProvider(config?: RealmLlmConfig): OutputProvider | null {
   // Per-role override with per-variable fallback to the loop's MEMORING_LLM_* (§6).
-  const baseURL = process.env.MEMORING_ASK_BASE_URL ?? process.env.MEMORING_LLM_BASE_URL;
-  const model = process.env.MEMORING_ASK_MODEL ?? process.env.MEMORING_LLM_MODEL;
+  const baseUrlFromEnv = process.env.MEMORING_ASK_BASE_URL ?? process.env.MEMORING_LLM_BASE_URL;
+  const baseURL = baseUrlFromEnv ?? config?.base_url;
+  const model = process.env.MEMORING_ASK_MODEL ?? process.env.MEMORING_LLM_MODEL ?? config?.model;
   if (!baseURL || !model) {
     warnNoOutputModel();
     return null;
   }
 
-  const egressEnv = process.env.MEMORING_ASK_EGRESS ?? process.env.MEMORING_LLM_EGRESS;
+  const egressEnv =
+    process.env.MEMORING_ASK_EGRESS ??
+    process.env.MEMORING_LLM_EGRESS ??
+    configEgressForBaseUrl(baseURL, baseUrlFromEnv, config);
   let egress: 'local' | 'remote' | undefined =
     egressEnv === 'local' ? 'local' : egressEnv === 'remote' ? 'remote' : undefined;
 
@@ -90,6 +96,17 @@ export function resolveOutputProvider(): OutputProvider | null {
   const provider = new LlmOutputProvider(backend);
   log.info('ask:output_provider', { id: provider.id, egress: provider.egress });
   return provider;
+}
+
+function configEgressForBaseUrl(
+  baseURL: string,
+  baseUrlFromEnv: string | undefined,
+  config: RealmLlmConfig | undefined,
+): 'local' | 'remote' | undefined {
+  if (baseUrlFromEnv !== undefined) return undefined;
+  if (config?.egress === 'remote') return 'remote';
+  if (config?.egress === 'local' && isLoopback(baseURL)) return 'local';
+  return undefined;
 }
 
 function isTruthy(v: string | undefined): boolean {
