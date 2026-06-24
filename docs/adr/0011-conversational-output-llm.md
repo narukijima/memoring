@@ -1,8 +1,14 @@
 # ADR 0011 — Conversational output-layer LLM (natural-language I/O over gated memory)
 
-- Status: Accepted (plan only; the feature is deferred — no code ships with this ADR)
-- Date: 2026-06-24
-- Scope: records the model for a future natural-language I/O surface (a "chat with this
+- Status: Accepted — **IMPLEMENTED for the v1 slices.** `memoring ask` (one-shot) and `memoring chat`
+  (multi-turn) ship the output-layer renderer, the `OutputProvider.generate` capability (distinct from
+  `MemoryProvider.abstract()`), and the per-role `MEMORING_ASK_*` config split — all strictly within the
+  model below. See `apps/cli/commands/ask.ts`, `apps/cli/commands/chat.ts`, `apps/cli/output-provider.ts`,
+  `tests/ask.test.ts`, `tests/chat.test.ts`, and the two addenda. The items under **Deferred** (agentic
+  multi-hop, the cross-Realm twin, write-back, the remote-default-on amendment, the Web chat surface,
+  per-Realm persona) remain deferred.
+- Date: 2026-06-24 (v1 slices implemented 2026-06-24, PRs #27 `ask`, #30 `chat` + per-role config)
+- Scope: records the model for the natural-language I/O surface (a "chat with this
   Realm" experience) placed strictly **downstream of the output Gate**. It decides the
   layering, the retrieval/synthesis flow, scope, grounding, egress posture, and the
   provider-abstraction prerequisite. No Realm/key/Gate change; no frozen invariant moves.
@@ -36,7 +42,8 @@ conversation surface is the missing **language organ**: a renderer that lets the
 prose and read answers in prose, without the LLM ever becoming the memory or entering the
 consolidation loop. The risk to avoid is the obvious one — bolting a chatbot onto the store so
 that the model's fluency, priors, or hallucinations leak *into* the memory or *past* the Gate.
-This ADR records the model that keeps that from happening, and defers the build to later phases.
+This ADR records the model that keeps that from happening; the v1 build (CLI `ask` / `chat`) has since
+landed within it in phased slices (see the addenda), with the wider surface still deferred.
 
 ## Decision
 
@@ -47,7 +54,7 @@ Memoring recognizes exactly two LLM roles, separated by the Gate:
 | Layer | Role | Sees | Egress default | This ADR |
 | --- | --- | --- | --- | --- |
 | **Loop-layer** (existing) | `abstract()` — classify / abstract Events → Claim candidates | **raw history** (pre-Gate) | **remote OFF** (ADR-0003 opt-in) | unchanged |
-| **Output-layer** (new) | natural-language I/O renderer | **only post-Gate excerpts** | remote-*capable*; default needs a §7.3/§7.5 amendment (§5) | introduced here |
+| **Output-layer** (new) | natural-language I/O renderer | **only post-Gate excerpts** | **LOCAL by default; remote opt-in** (settled, Addendum 1; remote-default-on declined) | introduced here, implemented in v1 (`ask` / `chat`) |
 
 The output-layer LLM is a **language organ**, not a chatbot and not part of consolidation. The
 memory remains the deterministic internal store. Swapping the output provider changes the
@@ -85,10 +92,15 @@ phrasing aid, never a source of facts about the owner.
 
 ### 5. Egress — provider-agnostic; the output layer is remote-*capable*, but defaulting it to remote requires a spec amendment
 
+> **Settled by Addendum 1 (2026-06-24):** the open "may default to remote" question below was resolved
+> **LOCAL-by-default + remote opt-in**; the remote-default-on amendment is **declined, not pursued**.
+> The original framing is kept as the decision record this addendum supersedes.
+
 Internal and external providers are treated at **parity** (a swappable registry, §6). The owner's
-intent is that the output role **may default to remote**, justified by *what the output LLM can
-see*: only post-Gate, secret-free, in-scope excerpts. This is recorded as a **deferred intent, not
-asserted as already-permitted.** A remote output provider rides the `remote_ai` purpose
+original intent **was** that the output role **might default to remote**, justified by *what the
+output LLM can see*: only post-Gate, secret-free, in-scope excerpts. It **was** recorded as a
+**deferred intent, not asserted as already-permitted** — and Addendum 1 has since settled it
+(LOCAL-by-default + remote opt-in). A remote output provider rides the `remote_ai` purpose
 (`remote_ai_processing` Audience), which the frozen baseline marks **default-DENY + scope opt-in**
 (policy.v2 `remote-ai-default-off`; Specification §7.3 / §7.5 — the single source of truth).
 Enabling the output role remote **by default would therefore require amending §7.3 / §7.5 /
@@ -107,9 +119,12 @@ safeguards:
   disclosed, and a single setting (an env var / per-Realm setting) forces the output layer
   on-device. The owner can always keep the conversation entirely local.
 - **(b) The loop-layer stays default-OFF, separately.** ADR-0003's raw-history opt-in
-  (`MEMORING_LLM_REMOTE_OPT_IN`) is **unchanged** and remains default-deny. The output-layer
-  remote default is a *distinct per-role knob* over already-Gated content; it does **not**
-  relax the raw-history path, and the §7.3 egress table itself is untouched.
+  (`MEMORING_LLM_REMOTE_OPT_IN`) is **unchanged** and remains default-deny. Any output-layer
+  remote use is a **separate concern** over already-Gated content; it does **not** relax the
+  raw-history path, and the §7.3 egress table itself is untouched. (As implemented, per-role
+  `MEMORING_ASK_*` config selects the provider — base URL / model / API key / egress preference —
+  but the remote **opt-in gate** `MEMORING_LLM_REMOTE_OPT_IN` is **shared** with the loop, so no
+  per-role setting alone enables a remote default; Addendum 2.)
 - **(c) The synthesized output carries the Ouroboros / self-ingestion marker.** Natural
   language produced by the output LLM is Memoring-generated context and carries the
   self-generated marker (the `memoring:ouroboros` token / signed ` ```memoring-ouroboros `
@@ -120,9 +135,10 @@ safeguards:
   self-promoting to `confirmed`, gated on explicit user confirmation — the same boundary
   ADR-0007 (import) and ADR-0010 (web panel) already hold.
 
-Until such an amendment exists, the output role is held to the same `remote-ai-default-off` posture
-as any `remote_ai` consumer: **OFF by default, scope opt-in required**. Whether an amended default
-later rides §7.5 scope opt-in or a dedicated per-role setting is itself **deferred**. This ADR does
+The output role is held to the same `remote-ai-default-off` posture as any `remote_ai` consumer:
+**OFF by default, scope opt-in required**. (The originally-open question of whether an amended
+default might later ride §7.5 scope opt-in or a dedicated per-role setting was **settled by
+Addendum 1: declined** — local-default + remote opt-in, no amendment sought.) This ADR does
 **not** flip §7.5, §7.3, or any egress default. The non-negotiable floor is the Gate column above:
 no raw secret egress, ever, under any provider.
 
@@ -167,19 +183,27 @@ language organ may adopt a voice the owner sets; it must not infer one from a fi
 - The owner can run the conversation fully on-device (force-local) or accept a remote renderer
   whose input is, by construction, already the safe-to-emit set.
 - A clear separation is recorded between the **loop-layer** (raw history, remote default-OFF,
-  untouched) and the **output-layer** (post-Gate; remote-*capable* but still OFF-by-default until a
-  §7.3/§7.5 amendment) so a future implementer cannot quietly relax the raw-history path — or
-  default the renderer to remote without amending the egress table — while building the chat surface.
-- One concrete prerequisite is named (the provider `generate` capability) so the build does not
-  start by mutating a frozen interface ad hoc.
-- No frozen invariant moves and no code ships with this ADR.
+  untouched) and the **output-layer** (post-Gate; **LOCAL by default, remote configurable but
+  discouraged and opt-in** per Addendum 1 — the remote-default-on amendment was declined, not pursued)
+  so a future implementer cannot quietly relax the raw-history path — or default the renderer to remote
+  without amending the egress table — while building the chat surface.
+- One concrete prerequisite was named (the provider `generate` capability) so the build did not
+  start by mutating a frozen interface ad hoc — it was then satisfied on a **separate** `OutputProvider`
+  interface (`apps/cli/output-provider.ts`), leaving `MemoryProvider.abstract()` untouched (see addenda).
+- No frozen invariant moves. The v1 slices (`ask` / `chat`) ship strictly within the model above; the
+  wider conversational surface remains deferred (see **Deferred** and the addenda).
 
-## Deferred (not in this change)
+## Deferred — and what has since shipped
 
-- **All implementation.** The chat/CLI/Web surface, the provider `generate` capability, the
-  per-role registry wiring, and any setting changes are **subsequent phased PRs after this ADR
-  is accepted**. The natural first rung is the MCP tools that already exist today
-  (`memoring_search`); a dedicated `memoring chat` surface is a later phase.
+**Shipped since acceptance** (no longer deferred — see the addenda): the CLI `ask` (one-shot) and
+`chat` (multi-turn) surfaces, the `OutputProvider.generate` capability, and the per-role
+`MEMORING_ASK_*` config split.
+
+**Still deferred (not built):**
+
+- **The Web conversational surface.** A "chat with this Realm" surface hosted in the Web control panel
+  (ADR-0010) is **not yet built**; only the CLI slices ship. MCP `memoring_search` remains the
+  deterministic first rung.
 - **Agentic / multi-hop associative retrieval** (the LLM iterating queries and chaining
   associations) — v1 is one-shot (§2).
 - **A global cross-Realm "whole-self" twin** — its own future ADR; conflicts with the
@@ -188,8 +212,11 @@ language organ may adopt a voice the owner sets; it must not infer one from a fi
   (§5d); not designed here.
 - **The output role's remote default.** Defaulting the output renderer to remote rides the
   `remote_ai` purpose that §7.3 / §7.5 / policy.v2 freeze as default-deny + scope opt-in, so it
-  **requires a spec amendment** (a future ADR), not a build-time toggle. Until then the output role
-  is OFF-by-default like any `remote_ai` consumer. This ADR flips no egress default (§5).
+  **would require a spec amendment** (a future ADR), not a build-time toggle — and **Addendum 1
+  declined that path** (local-default + remote opt-in, no amendment sought). The output role is
+  therefore OFF-by-default like any `remote_ai` consumer. This ADR flips no egress default (§5).
+- **Per-Realm persona config.** The owner-defined voice/tone of §7 is not yet a configurable surface;
+  any persona stays user-defined config, never a hard-coded category, when it lands.
 
 ## Addendum — settled egress posture (2026-06-24)
 
@@ -235,4 +262,5 @@ above; no frozen invariant moves.
   split flips no egress default and seeks no §7.3 / §7.5 amendment.
 
 Still deferred (unchanged): agentic / multi-hop associative retrieval, the global cross-Realm
-"whole-self" twin, any write-back, the remote-default-on amendment, and per-Realm persona config.
+"whole-self" twin, any write-back, the Web conversational surface, the remote-default-on amendment,
+and per-Realm persona config.
