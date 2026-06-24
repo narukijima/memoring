@@ -6,6 +6,7 @@
 // evidence authority (prevents user-authority spoofing, FR-081).
 import { newId } from '@core/schema/ids';
 import { SCHEMA_VERSION } from '@core/schema/versions';
+import { packageVersion } from '@core/version';
 import { CLAIM_KINDS } from '@core/schema/enums';
 import { searchRealm } from './search';
 import { resolveActiveLabelIds } from './active-scope';
@@ -140,7 +141,7 @@ function dispatch(ctx: RealmContext, req: RpcRequest): string | null {
       return rpcResult(req.id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'memoring', version: 'v0' },
+        serverInfo: { name: 'memoring', version: packageVersion },
       });
     case 'notifications/initialized':
       return null; // notification, no response
