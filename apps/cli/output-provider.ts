@@ -12,8 +12,11 @@
 // renderer cannot fabricate prose, so an unusable configuration returns null and the
 // caller prints actionable guidance.
 //
-// v1 reuses the existing MEMORING_LLM_* env config; a dedicated per-role split
-// (MEMORING_ASK_*) is a follow-up only (ADR-0011 §6).
+// Per-role config (ADR-0011 §6): the output role reads its own MEMORING_ASK_*
+// namespace (BASE_URL / MODEL / API_KEY / EGRESS), falling back PER-VARIABLE to the
+// loop's MEMORING_LLM_* when unset, so ask/chat can use a different model than the
+// loop MemoryProvider. The remote opt-in gate is SHARED and unchanged
+// (MEMORING_LLM_REMOTE_OPT_IN); this split moves NO egress default.
 import { OpenAiCompatibleBackend, isLoopback } from '@integrations/llm/openai-compatible';
 import type { LlmBackend } from '@claim/llm-provider';
 import { log } from '@core/log';
@@ -49,19 +52,17 @@ export class LlmOutputProvider implements OutputProvider {
  * falls back to a non-generative provider (no fabricated prose; ADR-0011 §5/§6).
  */
 export function resolveOutputProvider(): OutputProvider | null {
-  const baseURL = process.env.MEMORING_LLM_BASE_URL;
-  const model = process.env.MEMORING_LLM_MODEL;
+  // Per-role override with per-variable fallback to the loop's MEMORING_LLM_* (§6).
+  const baseURL = process.env.MEMORING_ASK_BASE_URL ?? process.env.MEMORING_LLM_BASE_URL;
+  const model = process.env.MEMORING_ASK_MODEL ?? process.env.MEMORING_LLM_MODEL;
   if (!baseURL || !model) {
     warnNoOutputModel();
     return null;
   }
 
+  const egressEnv = process.env.MEMORING_ASK_EGRESS ?? process.env.MEMORING_LLM_EGRESS;
   let egress: 'local' | 'remote' | undefined =
-    process.env.MEMORING_LLM_EGRESS === 'local'
-      ? 'local'
-      : process.env.MEMORING_LLM_EGRESS === 'remote'
-        ? 'remote'
-        : undefined;
+    egressEnv === 'local' ? 'local' : egressEnv === 'remote' ? 'remote' : undefined;
 
   if (isTruthy(process.env.MEMORING_LLM_PROXY)) {
     // A subscription-bridging proxy forwards text OFF the device, so it is `remote`
@@ -82,7 +83,7 @@ export function resolveOutputProvider(): OutputProvider | null {
   const backend = new OpenAiCompatibleBackend({
     baseURL,
     model,
-    apiKey: process.env.MEMORING_LLM_API_KEY,
+    apiKey: process.env.MEMORING_ASK_API_KEY ?? process.env.MEMORING_LLM_API_KEY,
     egress: effectiveEgress,
     id: process.env.MEMORING_LLM_ID,
   });
@@ -99,9 +100,10 @@ function isTruthy(v: string | undefined): boolean {
  *  to a model — recommending a keyless, on-device local endpoint. */
 function warnNoOutputModel(): void {
   const lines = [
-    '`memoring ask` needs a generative model and will not fabricate an answer without one.',
-    'Set MEMORING_LLM_BASE_URL and MEMORING_LLM_MODEL to a model. For a keyless, on-device path,',
-    'run a local model (e.g. Ollama) and point MEMORING_LLM_BASE_URL at its loopback endpoint:',
+    '`memoring ask` / `memoring chat` need a generative model and will not fabricate an answer without one.',
+    'Set MEMORING_LLM_BASE_URL and MEMORING_LLM_MODEL to a model (or the per-role MEMORING_ASK_BASE_URL /',
+    'MEMORING_ASK_MODEL to use a different model than the loop). For a keyless, on-device path, run a local',
+    'model (e.g. Ollama) and point the base URL at its loopback endpoint:',
     '    MEMORING_LLM_BASE_URL=http://127.0.0.1:11434/v1  MEMORING_LLM_MODEL=qwen2.5:3b',
   ];
   for (const l of lines) console.error(`  [warn] ${l}`);

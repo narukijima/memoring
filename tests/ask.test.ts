@@ -5,20 +5,12 @@ import path from 'node:path';
 import { askRealm, buildAskPrompt, cmdAsk } from '../apps/cli/commands/ask';
 import { resolveOutputProvider, type OutputProvider } from '../apps/cli/output-provider';
 import { createReplicaAtRoot } from '../apps/cli/commands/init';
-import { searchRealm, indexEvent, type SearchResult } from '@retrieval/search';
+import { searchRealm, type SearchResult } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { textLooksContextInjected } from '@security/ouroboros';
-import { openRealmLocal } from '@core/runtime';
 import { basePath } from '@core/paths';
-import { writeRealmConfig } from '@core/realm';
-import { newId } from '@core/schema/ids';
-import { SCHEMA_VERSION } from '@core/schema/versions';
-import { normalizeLabel } from '@core/label-normalize';
-import { realmHmac } from '@security/crypto-primitives';
-import { runSecretScan } from '@security/secret-scan';
-import { eventIdentity, sessionIdentity, sourceIdentity } from '@intake/identity';
-import type { Assignment, Label, MemEvent } from '@core/schema/entities';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
+import { createIndexedReplica } from './helpers';
 
 /** Output provider that records calls/prompts and returns a canned reply — never a
  *  network call (mirrors the RecordingProvider pattern in llm-provider.test.ts). */
@@ -103,6 +95,10 @@ describe('resolveOutputProvider egress posture (local default / remote opt-in; A
     'MEMORING_LLM_REMOTE_OPT_IN',
     'MEMORING_LLM_PROXY',
     'MEMORING_LLM_ID',
+    'MEMORING_ASK_BASE_URL',
+    'MEMORING_ASK_MODEL',
+    'MEMORING_ASK_API_KEY',
+    'MEMORING_ASK_EGRESS',
   ];
   const saved: Record<string, string | undefined> = {};
   let errors: string[];
@@ -158,12 +154,69 @@ describe('resolveOutputProvider egress posture (local default / remote opt-in; A
     expect(provider).toBeNull();
     expect(errors.join('\n')).toContain('MEMORING_LLM_BASE_URL');
   });
+
+  // Per-role config split (ADR-0011 §6): the output role reads its own MEMORING_ASK_*
+  // namespace, falling back PER-VARIABLE to MEMORING_LLM_* — so ask/chat can use a
+  // different model than the loop without touching the egress posture.
+  it('falls back to MEMORING_LLM_* when no MEMORING_ASK_* is set', () => {
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'loop-model';
+    const provider = resolveOutputProvider();
+    expect(provider).not.toBeNull();
+    expect(provider!.id).toContain('loop-model'); // the loop's model is reused
+  });
+
+  it('MEMORING_ASK_* overrides MEMORING_LLM_* for the output role (different model)', () => {
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'loop-model';
+    process.env.MEMORING_ASK_MODEL = 'output-model'; // base URL still falls back
+    const provider = resolveOutputProvider();
+    expect(provider).not.toBeNull();
+    expect(provider!.id).toContain('output-model'); // the override wins
+    expect(provider!.id).not.toContain('loop-model');
+    expect(provider!.egress).toBe('local'); // base URL fell back to the loopback loop URL
+  });
+
+  it('MEMORING_ASK_BASE_URL alone (loopback) resolves the output role on-device', () => {
+    process.env.MEMORING_ASK_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_ASK_MODEL = 'output-model';
+    const provider = resolveOutputProvider();
+    expect(provider).not.toBeNull();
+    expect(provider!.egress).toBe('local');
+  });
+
+  it('a remote MEMORING_ASK_BASE_URL still rides the shared default-OFF gate (refused without opt-in)', () => {
+    process.env.MEMORING_ASK_BASE_URL = 'https://api.deepseek.com/v1';
+    process.env.MEMORING_ASK_MODEL = 'deepseek-chat';
+    const provider = resolveOutputProvider();
+    expect(provider).toBeNull(); // the per-role split moves NO egress default
+    expect(errors.join('\n')).toContain('MEMORING_LLM_REMOTE_OPT_IN');
+  });
+
+  it('MEMORING_ASK_EGRESS overrides the loop egress; opt-in still permits remote', () => {
+    process.env.MEMORING_ASK_BASE_URL = 'https://api.deepseek.com/v1';
+    process.env.MEMORING_ASK_MODEL = 'deepseek-chat';
+    process.env.MEMORING_ASK_EGRESS = 'remote';
+    process.env.MEMORING_LLM_REMOTE_OPT_IN = '1';
+    const provider = resolveOutputProvider();
+    expect(provider).not.toBeNull();
+    expect(provider!.egress).toBe('remote');
+  });
 });
 
 describe('cmdAsk end-to-end (dispatch → scope gate → render)', () => {
   const env = { ...process.env };
   const cwd = process.cwd();
-  const LLM_KEYS = ['MEMORING_LLM_BASE_URL', 'MEMORING_LLM_MODEL', 'MEMORING_LLM_REMOTE_OPT_IN', 'MEMORING_LLM_PROXY'];
+  const LLM_KEYS = [
+    'MEMORING_LLM_BASE_URL',
+    'MEMORING_LLM_MODEL',
+    'MEMORING_LLM_REMOTE_OPT_IN',
+    'MEMORING_LLM_PROXY',
+    'MEMORING_ASK_BASE_URL',
+    'MEMORING_ASK_MODEL',
+    'MEMORING_ASK_EGRESS',
+    'MEMORING_ASK_API_KEY',
+  ];
   let tmp: string;
   let logs: string[];
   let errors: string[];
@@ -212,7 +265,7 @@ describe('cmdAsk end-to-end (dispatch → scope gate → render)', () => {
     const base = basePath();
     const projectRoot = path.join(tmp, 'proj');
     fs.mkdirSync(projectRoot, { recursive: true });
-    createAskRealm(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
     process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1'; // loopback → local, no opt-in
     process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
     const fetchMock = vi.fn(
@@ -235,7 +288,7 @@ describe('cmdAsk end-to-end (dispatch → scope gate → render)', () => {
     const base = basePath();
     const projectRoot = path.join(tmp, 'proj');
     fs.mkdirSync(projectRoot, { recursive: true });
-    createAskRealm(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
     process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
     process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
@@ -247,85 +300,3 @@ describe('cmdAsk end-to-end (dispatch → scope gate → render)', () => {
     expect(logs.join('\n')).toContain('No grounded answer');
   });
 });
-
-/** Persist a Realm at `root` with one classified, indexed, in-scope event (mirrors
- *  the createSearchRealm helper used by the multi-Realm CLI tests). */
-function createAskRealm(root: string, name: string, projectRoot: string, text: string): void {
-  createReplicaAtRoot({ root, name, usePassphrase: false });
-  const ctx = openRealmLocal(root);
-  try {
-    const projectId = `proj_${name}`;
-    const labelId = `lbl_${name}`;
-    ctx.config.projects.push({
-      project_id: projectId,
-      name,
-      root_paths: [projectRoot],
-      git_remotes: [],
-      default_sensitivity: 'internal',
-    });
-    const label: Label = {
-      label_id: labelId,
-      realm_id: ctx.realmId,
-      canonical_name: name,
-      normalized_key: realmHmac(ctx.realmKey, normalizeLabel(name)),
-      aliases: [],
-      state: 'active',
-      merged_into: null,
-      created_at: new Date().toISOString(),
-      schema_version: SCHEMA_VERSION.label,
-    };
-    ctx.store.putLabel(label);
-
-    const src = sourceIdentity(ctx.realmKey, 'test', `${name}-source`);
-    const ses = sessionIdentity(ctx.realmKey, src, `${name}-session`);
-    const eventId = newId('event');
-    const textRef = ctx.objects.put(`${eventId}_text`, Buffer.from(text, 'utf8')).ref;
-    const event: MemEvent = {
-      event_id: eventId,
-      event_identity: eventIdentity(ctx.realmKey, src, ses, `${name}-message`, text),
-      realm_id: ctx.realmId,
-      occurrence_ids: [newId('occurrence')],
-      session_id: `ses_${name}`,
-      turn_id: null,
-      event_type: 'message',
-      role: 'user',
-      origin: 'user',
-      created_at: new Date().toISOString(),
-      source_timestamp: null,
-      timestamp_confidence: 'capture_observed',
-      sequence: 1,
-      text_ref: textRef,
-      source_extra_ref: null,
-      sensitivity: 'internal',
-      sensitivity_classification_state: 'inferred',
-      context_injected: false,
-      context_pack_digest: null,
-      parser_version: 'test.v1',
-      status: 'active',
-      schema_version: SCHEMA_VERSION.event,
-    };
-    const assignment: Assignment = {
-      assignment_id: newId('assignment'),
-      realm_id: ctx.realmId,
-      target_type: 'event',
-      target_id: eventId,
-      label_ids: [labelId],
-      project_ids: [projectId],
-      classification_state: 'inferred',
-      assigned_by: 'rule:path_git_remote',
-      confidence: 1,
-      evidence: [event.occurrence_ids[0]!],
-      created_by_derivation_id: null,
-      created_at: new Date().toISOString(),
-      schema_version: SCHEMA_VERSION.assignment,
-    };
-    ctx.store.putEvent(event);
-    ctx.store.putSecretScan(runSecretScan(event.event_id, text));
-    ctx.store.putAssignment(assignment);
-    indexEvent(ctx, event);
-    writeRealmConfig(ctx.layout.realmToml, ctx.config);
-    ctx.flush();
-  } finally {
-    ctx.close(true);
-  }
-}
