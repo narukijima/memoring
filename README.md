@@ -33,25 +33,31 @@ Requires **Node.js 20 or 22 (LTS)**. Node 24 works too; the newest releases (e.g
 to compile the native `better-sqlite3` dependency. If `npm install` errors while building
 better-sqlite3, switch to Node 22 LTS (`nvm install 22 && nvm use 22`) and reinstall.
 
-Run every command below from the cloned repository directory.
+Run the `npm` setup steps from the cloned repository directory. After `npm link`, the `memoring`
+command works from anywhere.
 
 ```bash
 git clone https://github.com/narukijima/memoring.git
-cd memoring                      # run every command below from here
+cd memoring                      # run the npm setup steps from here
 
 npm install                      # if native installs are gated:
                                  #   npm approve-scripts better-sqlite3 esbuild fsevents && npm install
 npm run typecheck && npm test    # optional: verify the build
+npm link                         # optional: put a global `memoring` command on your PATH
 
 # Create the local replica (no password by default; add --passphrase for a strong encrypted vault):
-node bin/memoring.mjs init
+memoring init
 
 # Discover and connect your Claude Code history, choosing a sensitivity policy, then backfill:
-node bin/memoring.mjs connect claude-code --all --backfill --default-sensitivity internal
+memoring connect claude-code --all --backfill --default-sensitivity internal
 
 # From inside a project, hand safe context to your next AI session (the main exit):
-node bin/memoring.mjs context build          # writes .memoring/context.md through the Gate
+memoring context build           # writes .memoring/context.md through the Gate
 ```
+
+`npm link` puts a global `memoring` on your PATH (remove it later with `npm unlink -g memoring`). If
+you skip it, run the CLI from the repo as `node bin/memoring.mjs <command>` in place of every
+`memoring <command>` below.
 
 Safety model in one line: every output passes a single **Gate** (Audience × Aperture) before
 ranking; secret / unknown / out-of-scope / unclassified content is never emitted; deletions and
@@ -71,11 +77,11 @@ multiple local Realms through a private registry at `<base>/realms.toml`
 payload.
 
 ```bash
-node bin/memoring.mjs realm new work
-node bin/memoring.mjs realm new personal --passphrase
-node bin/memoring.mjs realm list --stats
-node bin/memoring.mjs realm use work
-node bin/memoring.mjs realm current
+memoring realm new work
+memoring realm new personal --passphrase
+memoring realm list --stats
+memoring realm use work
+memoring realm current
 ```
 
 Recall commands do not guess from the sticky current Realm. They resolve in this order:
