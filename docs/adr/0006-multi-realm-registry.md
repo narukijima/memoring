@@ -64,8 +64,10 @@ Recall/data commands (`context`, `search`, `backfill`, `watch`, `reprocess`,
 egress/data commands) resolve in this order:
 
 1. `--realm <id|name>`: lookup in the registry and resolve to one root.
-2. `MEMORING_HOME` pointing directly at a replica: if `<base>/realm.toml` exists,
-   use that root without requiring a registry.
+2. Direct base replica: if `<base>/realm.toml` exists **and it is the only
+   registered Realm**, use that root without requiring a registry (legacy
+   single-replica back-compat). Once a second Realm is registered this tier is
+   skipped, so a normal `init`-at-base layout still gets CWD switching.
 3. CWD unique match: canonicalize CWD and match it against every registered
    Realm's plaintext `realm.toml` `projects[].root_paths` and `git_remotes`.
 4. Otherwise Silence. Do not fall back to the registry `current` pointer.
@@ -87,7 +89,10 @@ MEMORING_HOME=/path/to/replica
 /path/to/replica/realm.toml
 ```
 
-That path takes precedence over registry/current for recall/data commands.
+That path takes precedence over registry/current for recall/data commands **while it
+is the only registered Realm**. After `realm new` adds a second Realm, the base
+replica becomes the `default` registered Realm and is resolved like any other (by
+`--realm` or CWD match), so it no longer swallows every resolution.
 
 If a legacy replica exists at `<base>/realm.toml`, it is lazily and idempotently
 registered as `default` with `root=<base>`. The replica is never moved. Failure

@@ -237,6 +237,107 @@ describe('multi-Realm active resolution', () => {
   });
 });
 
+describe('multi-Realm resolution after a real init (base replica coexists with others)', () => {
+  const env = { ...process.env };
+  const cwd = process.cwd();
+  let tmp: string;
+  let logs: string[];
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memoring-postinit-'));
+    process.env.MEMORING_HOME = path.join(tmp, 'home');
+    delete process.env.MEMORING_PASSPHRASE;
+    logs = [];
+    vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(' ')); });
+    vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(' ')); });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    process.env = { ...env };
+    process.chdir(cwd);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('recall + current reach a non-default Realm once a base replica coexists with others', async () => {
+    const base = basePath();
+    // Simulate `memoring init`: the first ("default") Realm lives AT base.
+    createReplicaAtRoot({ root: base, name: 'default', usePassphrase: false });
+    ensureLegacyRegistered(base);
+    // A second Realm with a registered project root.
+    const projectWork = path.join(tmp, 'work-project');
+    fs.mkdirSync(projectWork, { recursive: true });
+    const work = createSearchRealm(path.join(base, 'realms', 'work'), 'work', projectWork, 'work unique memory');
+    addRealm(registryEntry(work), base);
+
+    // Recall from inside work's project resolves to work — NOT the base/default Realm.
+    expect(resolveActiveReplicaRoot({ flags: {}, cwd: projectWork, commandClass: 'recall', base })).toBe(work.layout.root);
+
+    // `realm use` + mgmt resolution honor the chosen Realm (not the base default).
+    expect(await cmdRealm(['use', 'work'])).toBe(0);
+    expect(resolveActiveReplicaRoot({ flags: {}, cwd: tmp, commandClass: 'mgmt', base })).toBe(work.layout.root);
+    logs.length = 0;
+    expect(await cmdRealm(['current'])).toBe(0);
+    expect(logs.join('\n')).toContain('work');
+
+    // From an unregistered CWD with multiple Realms present, recall Silences —
+    // it must not silently fall back to the base/default Realm.
+    const outside = path.join(tmp, 'outside');
+    fs.mkdirSync(outside, { recursive: true });
+    expect(isActiveRealmSilence(resolveActiveReplicaRoot({ flags: {}, cwd: outside, commandClass: 'recall', base }))).toBe(true);
+  });
+
+  it('preserves single-replica back-compat: a lone base replica resolves from any CWD', () => {
+    const base = basePath();
+    createReplicaAtRoot({ root: base, name: 'default', usePassphrase: false });
+    ensureLegacyRegistered(base);
+    const outside = path.join(tmp, 'outside');
+    fs.mkdirSync(outside, { recursive: true });
+    expect(resolveActiveReplicaRoot({ flags: {}, cwd: outside, commandClass: 'recall', base })).toBe(base);
+  });
+
+  it('skips a malformed registry entry instead of bricking management commands', async () => {
+    const base = basePath();
+    const good = createSearchRealm(path.join(base, 'realms', 'good'), 'good', path.join(tmp, 'p'), 'x');
+    const raw = [
+      '[[realms]]',
+      'name = "good"',
+      `realm_id = "${good.config.realm_id}"`,
+      `root = "${good.layout.root}"`,
+      `created_at = "${good.config.created_at}"`,
+      'key_mode = "local"',
+      '',
+      '[[realms]]',
+      'name = "bad"',
+      'realm_id = "realm_bad"',
+      'created_at = "2026-01-01T00:00:00.000Z"',
+      'key_mode = "local"',
+    ].join('\n');
+    fs.writeFileSync(registryPath(base), raw, { mode: 0o600 });
+
+    expect(listRealms(base).map((r) => r.name)).toEqual(['good']);
+    expect(await cmdRealm(['list'])).toBe(0); // does not throw on the malformed row
+  });
+
+  it('repoints current to the oldest remaining Realm when the current Realm is removed', async () => {
+    const base = basePath();
+    const mk = (name: string, created: string) => {
+      const c = createReplicaAtRoot({ root: path.join(base, 'realms', name), name, usePassphrase: false });
+      addRealm({ name, realm_id: c.config.realm_id, root: c.layout.root, created_at: created, key_mode: 'local' }, base);
+      return c;
+    };
+    const alpha = mk('alpha', '2026-01-01T00:00:00.000Z');
+    mk('beta', '2026-02-01T00:00:00.000Z');
+    const gamma = mk('gamma', '2026-03-01T00:00:00.000Z');
+
+    expect(await cmdRealm(['use', 'gamma'])).toBe(0);
+    expect(readRegistry(base).current).toBe(gamma.config.realm_id);
+    expect(await cmdRealm(['rm', 'gamma', '--yes'])).toBe(0);
+    expect(readRegistry(base).current).toBe(alpha.config.realm_id); // oldest remaining
+    expect(fs.existsSync(gamma.layout.root)).toBe(false);
+  });
+});
+
 function registryEntry(created: ReturnType<typeof createSearchRealm>) {
   return {
     name: created.config.name,

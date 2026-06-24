@@ -571,9 +571,11 @@ Cross-Realm prohibited:
   Realms are by design not connected. Boundaries that are troublesome if mixed are made separate Realms (separate directory, separate key).
 
 Silence when Active Realm is unresolved:
-  Recall/data commands resolve in this order: --realm <id|name>, direct MEMORING_HOME replica,
-  unique CWD match across registered Realms' realm.toml projects[].root_paths/git_remotes, else
-  Silence. Do not fall back to the registry current pointer for recall/data commands.
+  Recall/data commands resolve in this order: --realm <id|name>, direct base replica
+  (a `<base>/realm.toml` only while it is the sole registered Realm — legacy single-replica
+  back-compat), unique CWD match across registered Realms' realm.toml projects[].root_paths/git_remotes,
+  else Silence. Once a second Realm is registered the direct-base tier is skipped so CWD matching
+  decides. Do not fall back to the registry current pointer for recall/data commands.
   Management commands may use the registry current pointer. When the Active Realm cannot be uniquely
   determined, do not mix by guessing and do not emit context.md/search/context output. Have the user
   specify it explicitly with --realm <id|name>, or do not emit output.

@@ -6,6 +6,7 @@ import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { atomicWriteFile, ensureDir } from '@storage/fs-safety';
 import { basePath, registryPath, replicaLayout } from './paths';
 import { readRealmConfig } from './realm';
+import { log } from './log';
 
 export type RealmRegistryKeyMode = 'local' | 'passphrase';
 
@@ -63,7 +64,17 @@ export function readRegistry(base = basePath()): RealmRegistry {
   if (!fs.existsSync(file)) return { realms: [] };
   const raw = parseToml(fs.readFileSync(file, 'utf8')) as RawRegistry;
   const realmsRaw = Array.isArray(raw.realms) ? raw.realms : [];
-  const realms = realmsRaw.map((entry, i) => normalizeEntry(entry, i));
+  // Skip a single malformed-but-syntactically-valid row rather than throwing for
+  // the whole file — otherwise one bad entry bricks every `realm` command,
+  // including `rm` (the only way to remove the bad entry). Valid rows stay usable.
+  const realms: RealmRegistryEntry[] = [];
+  realmsRaw.forEach((entry, i) => {
+    try {
+      realms.push(normalizeEntry(entry, i));
+    } catch (e) {
+      log.warn('realm-registry:skip-malformed-entry', { index: i, reason: (e as Error).message });
+    }
+  });
   const current = typeof raw.current === 'string' && raw.current.length > 0 ? raw.current : undefined;
   return current ? { current, realms } : { realms };
 }

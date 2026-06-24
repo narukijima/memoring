@@ -179,7 +179,19 @@ export function resolveActiveReplicaRoot(opts: ResolveActiveReplicaRootOptions):
 
   if (replicaExists(base)) {
     ensureLegacyRegistered(base);
-    return base;
+    // A direct replica at base short-circuits ONLY while it is the sole Realm
+    // (legacy single-replica back-compat). Once other Realms are registered, fall
+    // through to CWD matching (recall) / the `current` pointer (mgmt) so §6.5
+    // switching actually engages — otherwise the base replica would swallow every
+    // resolution and `realm use` / CWD switching would never take effect.
+    const onlyBaseRealm = (() => {
+      try {
+        return readRegistry(base).realms.length <= 1;
+      } catch {
+        return true;
+      }
+    })();
+    if (onlyBaseRealm) return base;
   }
 
   if (opts.explicitOnly) {

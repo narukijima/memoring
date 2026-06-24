@@ -99,15 +99,6 @@ function matchingProjectsForCwd(config: RealmConfig, cwdRaw: string): RealmProje
   );
 }
 
-/**
- * Active Realm resolution (§6.5). A replica holds one Realm, so resolution is
- * trivial unless an explicit --realm is given that does not match.
- */
-export function resolveActiveRealm(config: RealmConfig, explicitRealm?: string): string | 'silence' {
-  if (explicitRealm && explicitRealm !== config.realm_id) return 'silence';
-  return config.realm_id;
-}
-
 export interface ActiveRealmCandidate {
   root: string;
 }

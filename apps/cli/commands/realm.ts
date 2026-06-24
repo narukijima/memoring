@@ -199,15 +199,17 @@ async function cmdRealmRm(flags: ReturnType<typeof parseFlags>): Promise<number>
   }
   if (!(await confirm(flags, `remove Realm ${realm.name} (${realm.realm_id}) and delete its directory`))) return 1;
 
-  appendAudit(path.join(base, 'logs'), 'realm_rm', { realm_id: realm.realm_id }, new Date().toISOString());
-  const before = readRegistry(base);
+  // Delete the on-disk replica FIRST, then drop the registry entry, then audit.
+  // This ordering keeps the Realm removable across a crash: dying after rmSync but
+  // before removeRealm leaves the entry resolvable, so `realm rm` re-runs
+  // idempotently (rmSync force-ignores the now-missing dir). The earlier
+  // registry-first order could orphan a directory of secret material (encrypted
+  // blob + keys) with no registry entry and no CLI recovery path. Auditing only
+  // after success keeps the log from asserting a removal that did not happen.
+  fs.rmSync(realm.root, { recursive: true, force: true });
   removeRealm(realm.realm_id, base);
-  try {
-    fs.rmSync(realm.root, { recursive: true, force: true });
-  } catch (e) {
-    writeRegistry(before, base);
-    throw e;
-  }
+  appendAudit(path.join(base, 'logs'), 'realm_rm', { realm_id: realm.realm_id }, new Date().toISOString());
+
   console.log(`  Removed Realm ${realm.name} (${realm.realm_id}).`);
   const current = getCurrent(base);
   if (current) console.log(`  Current Realm: ${current.name} (${current.realm_id})`);
