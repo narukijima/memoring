@@ -190,3 +190,21 @@ language organ may adopt a voice the owner sets; it must not infer one from a fi
   `remote_ai` purpose that §7.3 / §7.5 / policy.v2 freeze as default-deny + scope opt-in, so it
   **requires a spec amendment** (a future ADR), not a build-time toggle. Until then the output role
   is OFF-by-default like any `remote_ai` consumer. This ADR flips no egress default (§5).
+
+## Addendum — settled egress posture (2026-06-24)
+
+Recorded when the first implementation slice (the `memoring ask` CLI command) landed. This
+**supersedes the earlier "the output role may default to remote" framing** of §5 (the deferred
+intent), and settles the open question §5 left for a future amendment:
+
+> Settled posture: the output layer is LOCAL by default (recommended); a remote/cloud model is
+> configurable but DISCOURAGED and stays OPT-IN (clear disclosure that gated, secret-free excerpts
+> leave the device). Because remote stays opt-in, this is already compliant with §7.3 / §7.5
+> `remote-ai-default-off` — NO egress-table amendment is sought, and remote-default-on is explicitly
+> not pursued. This is the same local-default + opt-in posture the loop layer already enforces.
+
+Consequences for the build: the renderer simply aligns its existing egress determination with the
+loop layer (`isLoopback` + the same `MEMORING_LLM_REMOTE_OPT_IN` gate) rather than introducing a new
+default. The "remote-default-on would need a §7.3/§7.5/policy.v2 amendment" wording in §5 stands —
+that path is now declined, not taken. The remote disclosure is calibrated to this layer (gated,
+secret-free, in-scope excerpts leave, never raw history), and a local model is recommended.

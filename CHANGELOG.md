@@ -3,6 +3,30 @@
 All notable changes to Memoring — the frozen specification baseline and the v0 implementation
 built against it — are recorded here.
 
+## Unreleased — ask (conversational output)
+
+- **Talk to your Realm.** Added `memoring ask "<question>"` — the v1 output-layer LLM from
+  [ADR-0011](docs/adr/0011-conversational-output-llm.md): natural-language question → one gated
+  retrieval → a grounded prose answer. It resolves the active Realm + scope exactly like
+  `memoring search` (fail-closed to Silence when the scope is ambiguous) and reads ONLY via
+  `searchRealm` — strictly downstream of the Gate, never the raw store.
+- **Strict grounding (Silence extended to the renderer).** Zero retrieval results → it prints a
+  clear "no grounded answer for this scope" and returns **without calling the model** (no
+  fabrication, no general-knowledge backfill). With results, the model is instructed to answer ONLY
+  from the provided excerpts, in the user's language, and to refuse when the excerpts don't contain
+  the answer.
+- **Local by default, remote opt-in + discouraged.** A new `OutputProvider` role (distinct from the
+  loop `MemoryProvider`; interface frozen) resolves from the existing `MEMORING_LLM_*` env. A
+  loopback model (e.g. Ollama) needs no opt-in; a remote model stays **default-OFF** behind
+  `MEMORING_LLM_REMOTE_OPT_IN` with a disclosure calibrated to this layer (gated, secret-free
+  excerpts leave — never raw history). Unlike the loop, there is **no rule-based fallback**: an
+  unconfigured model prints actionable guidance and exits non-zero rather than inventing an answer.
+- **Read-only + Ouroboros.** v1 creates no Events / Claims / candidates. The printed answer carries
+  the signed `memoring:ouroboros` self-generation marker, so it can never launder back in as
+  evidence or reinforcement. One invocation binds to exactly one Realm. See
+  [ADR-0011 Addendum](docs/adr/0011-conversational-output-llm.md) for the settled egress posture; a
+  per-role config split (`MEMORING_ASK_*`) and agentic multi-hop retrieval remain follow-ups.
+
 ## Unreleased — import from AI
 
 - **Import memory from other AIs.** Added `memoring import` — paste a foreign-AI export
