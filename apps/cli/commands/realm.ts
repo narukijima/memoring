@@ -279,10 +279,23 @@ function entryForRoot(root: string, base: string): RealmRegistryEntry | undefine
   }
 }
 
+/** Resolve symlinks so the containment guard reflects the true on-disk target;
+ *  fall back to a lexical resolve when the path does not exist yet. Without this a
+ *  symlinked Realm root pointing at the base or another Realm would slip past the
+ *  guard (rmSync would still only unlink the symlink, but the guard should not be
+ *  silently inert). */
+function canonical(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
 function removalSafety(realm: RealmRegistryEntry, realms: RealmRegistryEntry[], base: string): string | undefined {
-  const root = path.resolve(realm.root);
-  if (containsOrEqual(root, path.resolve(base))) return 'the Realm root contains the registry base';
-  const other = realms.find((r) => r.realm_id !== realm.realm_id && containsOrEqual(root, path.resolve(r.root)));
+  const root = canonical(realm.root);
+  if (containsOrEqual(root, canonical(base))) return 'the Realm root contains the registry base';
+  const other = realms.find((r) => r.realm_id !== realm.realm_id && containsOrEqual(root, canonical(r.root)));
   if (other) return `the Realm root contains another registered Realm (${other.realm_id})`;
   return undefined;
 }

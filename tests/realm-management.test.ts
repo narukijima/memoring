@@ -5,6 +5,7 @@ import path from 'node:path';
 import { cmdRealm } from '../apps/cli/commands/realm';
 import { createReplicaAtRoot } from '../apps/cli/commands/init';
 import { cmdSearch } from '../apps/cli/commands/search';
+import { cmdContextBuild } from '../apps/cli/commands/context';
 import { addRealm, ensureLegacyRegistered, listRealms, readRegistry, writeRegistry } from '@core/realm-registry';
 import { basePath, registryPath, replicaLayout } from '@core/paths';
 import { isActiveRealmSilence, openActiveRealm, openRealmLocal, resolveActiveReplicaRoot } from '@core/runtime';
@@ -335,6 +336,69 @@ describe('multi-Realm resolution after a real init (base replica coexists with o
     expect(await cmdRealm(['rm', 'gamma', '--yes'])).toBe(0);
     expect(readRegistry(base).current).toBe(alpha.config.realm_id); // oldest remaining
     expect(fs.existsSync(gamma.layout.root)).toBe(false);
+  });
+
+  it('rejects `realm new` with a duplicate name', async () => {
+    expect(await cmdRealm(['new', 'dup'])).toBe(0);
+    logs.length = 0;
+    expect(await cmdRealm(['new', 'dup'])).toBe(1);
+    expect(logs.join('\n')).toContain('already exists');
+  });
+
+  it('resolves --realm by realm_id as well as by name, and Silences on an unknown one', () => {
+    const base = basePath();
+    const a = createSearchRealm(path.join(base, 'realms', 'a'), 'a', path.join(tmp, 'pa'), 'a mem');
+    addRealm(registryEntry(a), base);
+    expect(resolveActiveReplicaRoot({ flags: { realm: a.config.realm_id }, cwd: tmp, commandClass: 'recall', base })).toBe(a.layout.root);
+    expect(resolveActiveReplicaRoot({ flags: { realm: 'a' }, cwd: tmp, commandClass: 'recall', base })).toBe(a.layout.root);
+    expect(isActiveRealmSilence(resolveActiveReplicaRoot({ flags: { realm: 'nope' }, cwd: tmp, commandClass: 'recall', base }))).toBe(true);
+  });
+
+  it('watch (explicitOnly) binds a sole base replica without --realm, but requires --realm once a second Realm exists', () => {
+    const base = basePath();
+    createReplicaAtRoot({ root: base, name: 'default', usePassphrase: false });
+    ensureLegacyRegistered(base);
+    const outside = path.join(tmp, 'outside');
+    fs.mkdirSync(outside, { recursive: true });
+    // sole base replica → watch binds it directly
+    expect(resolveActiveReplicaRoot({ flags: {}, cwd: outside, commandClass: 'recall', explicitOnly: true, base })).toBe(base);
+    // a second Realm registered → no base swallow; watch must be told which Realm
+    const b = createSearchRealm(path.join(base, 'realms', 'b'), 'b', path.join(tmp, 'pb'), 'b mem');
+    addRealm(registryEntry(b), base);
+    expect(isActiveRealmSilence(resolveActiveReplicaRoot({ flags: {}, cwd: outside, commandClass: 'recall', explicitOnly: true, base }))).toBe(true);
+  });
+
+  it('refuses to rm a Realm whose root is the registry base or contains another Realm', async () => {
+    const base = basePath();
+    createReplicaAtRoot({ root: base, name: 'default', usePassphrase: false });
+    ensureLegacyRegistered(base); // registers base itself as `default`
+    // a Realm (x) whose directory nests another Realm (y) under it
+    const x = createReplicaAtRoot({ root: path.join(base, 'realms', 'x'), name: 'x', usePassphrase: false });
+    addRealm({ name: 'x', realm_id: x.config.realm_id, root: x.layout.root, created_at: x.config.created_at, key_mode: 'local' }, base);
+    const y = createReplicaAtRoot({ root: path.join(base, 'realms', 'x', 'y'), name: 'y', usePassphrase: false });
+    addRealm({ name: 'y', realm_id: y.config.realm_id, root: y.layout.root, created_at: y.config.created_at, key_mode: 'local' }, base);
+
+    logs.length = 0;
+    expect(await cmdRealm(['rm', 'default', '--yes'])).toBe(1); // root === base
+    expect(logs.join('\n')).toContain('registry base');
+    expect(fs.existsSync(base)).toBe(true);
+
+    logs.length = 0;
+    expect(await cmdRealm(['rm', 'x', '--yes'])).toBe(1); // x contains y
+    expect(logs.join('\n')).toContain('another registered Realm');
+    expect(fs.existsSync(x.layout.root)).toBe(true);
+  });
+
+  it('context build Silences (exit 2) when the active Realm is unresolved in a multi-Realm base', async () => {
+    const base = basePath();
+    createReplicaAtRoot({ root: base, name: 'default', usePassphrase: false });
+    ensureLegacyRegistered(base);
+    const b = createSearchRealm(path.join(base, 'realms', 'b'), 'b', path.join(tmp, 'pb'), 'b mem');
+    addRealm(registryEntry(b), base);
+    const outside = path.join(tmp, 'outside');
+    fs.mkdirSync(outside, { recursive: true });
+    process.chdir(outside);
+    expect(await cmdContextBuild([])).toBe(2);
   });
 });
 
