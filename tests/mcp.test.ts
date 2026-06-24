@@ -5,6 +5,7 @@ import {
   MAX_CANDIDATE_STATEMENT_CHARS,
   MAX_JSON_RPC_LINE_BYTES,
 } from '@retrieval/mcp';
+import { packageVersion } from '@core/version';
 import { makeTempRealm, type TempRealm } from './helpers';
 
 let realm: TempRealm;
@@ -40,5 +41,13 @@ describe('MCP resource bounds', () => {
     expect(parsed.result.isError).toBe(true);
     expect(parsed.result.content[0].text).toMatch(/statement exceeds/);
     expect(realm.ctx.store.listClaims(realm.ctx.realmId).length).toBe(before);
+  });
+});
+
+describe('MCP serverInfo', () => {
+  it('reports the package version, not a hardcoded string', () => {
+    const resp = handleMcpRequest(realm.ctx, { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    const parsed = JSON.parse(resp!);
+    expect(parsed.result.serverInfo.version).toBe(packageVersion);
   });
 });

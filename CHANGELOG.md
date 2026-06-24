@@ -27,6 +27,17 @@ built against it — are recorded here.
   Realm via the ADR-0006 resolution; secret-scan runs on every imported entry. Implements the
   ChatGPT/Claude/Gemini-export connector parked in [ADR-0004 §7](docs/adr/0004-v0_1-candidates.md).
 
+## Unreleased — version reporting
+
+- **Single source of truth for the version string.** `memoring version` / `--version` now report both
+  numbers dynamically — `memoring <package.json version> (spec <VERSION>)`, e.g. `memoring 0.1.2
+  (spec 1.0.0)` — read from the source tree at runtime (relative to the source location, not the
+  caller's CWD) instead of a hardcoded `memoring v0 (spec-v1.0)`. The MCP `serverInfo.version` reuses
+  the same package version. A test pins the output to `package.json` and the `VERSION` file so the
+  implementation/release version, the frozen spec baseline, and what the CLI prints can never silently
+  diverge. They are intentionally different numbers; see `docs/adr/0008-cli-upgrade-path.md` for the
+  semantics and the deferred, opt-in update-notifier plan.
+
 ## Unreleased — multi-Realm CLI
 
 - **First-class multi-Realm management.** Added `memoring realm new/list/use/current/rename/rm`
