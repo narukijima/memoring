@@ -3,11 +3,11 @@
 // (no plaintext index on disk). Index build happens only after Secret Scan;
 // secret/unknown are never indexed (CON-007). Search candidates exclude
 // unclassified and out-of-active-scope items.
-import type { ClassificationState } from '@core/schema/enums';
+import type { Audience, ClassificationState } from '@core/schema/enums';
 import { normalizeLabel } from '@core/label-normalize';
 import { readClaimStatement } from '@claim/extractor';
 import { eventSealSignature, isClaimSuppressed, matchesActivePatternSeal } from '@claim/seal';
-import { activeScopeContainsAll, allowedScopeState, bestClassificationState } from '@core/policy';
+import { activeScopeContainsAll, allowedScopeState, allowedSensitivityState, bestClassificationState } from '@core/policy';
 import type { Claim, MemEvent } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
 import type { IndexHit } from '@storage/repositories';
@@ -112,6 +112,9 @@ export interface SearchOptions {
    *  empty/absent set excludes everything, so out-of-scope items can never leak
    *  (G4/FR-042). The CLI Silences when active scope is unresolved. */
   activeLabelIds?: string[];
+  /** Audience for the search egress gate. Defaults to local ai_tool; remote
+   *  output renderers must pass remote_ai_processing (ADR-0011 §5a). */
+  audience?: Audience;
   limit?: number;
 }
 
@@ -125,6 +128,7 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
   const nq = norm(query);
   if (!nq) return [];
   const limit = opts.limit ?? 20;
+  const audience = opts.audience ?? 'ai_tool';
   const seen = new Set<string>();
   const merged: IndexHit[] = [];
   for (const hit of [...ctx.store.searchExact(ctx.realmId, nq), ...ctx.store.searchFts(ctx.realmId, nq)]) {
@@ -141,7 +145,9 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
     // Confidential is excluded on every search/MCP egress surface (Specification §4);
     // the context.md Gate adjudicates confidential separately (one-shot confirm).
     if (hit.sensitivity === 'secret' || hit.sensitivity === 'unknown' || hit.sensitivity === 'confidential') continue;
-    if (!allowedScopeState(hit.scope_state as ClassificationState, 'ai_tool', 'standard')) continue;
+    const sensitivityState = hitSensitivityState(ctx, hit);
+    if (!sensitivityState || !allowedSensitivityState(sensitivityState, audience, 'standard')) continue;
+    if (!allowedScopeState(hit.scope_state as ClassificationState, audience, 'standard')) continue;
     if (hit.scope_state === 'conflicted') continue;
     // Query-time Seal gate (defense in depth; also covers the MCP egress surface and
     // any stale index entry that predates a Seal — e.g. before a deterministic rebuild).
@@ -247,6 +253,11 @@ function hitIsSealed(ctx: RealmContext, hit: IndexHit): boolean {
   }
   const claim = ctx.store.getClaim(hit.ref_id);
   return !!claim && isClaimSuppressed(ctx, claim, readClaimStatement(ctx, claim));
+}
+
+function hitSensitivityState(ctx: RealmContext, hit: IndexHit): ClassificationState | null {
+  if (hit.ref_type === 'event') return ctx.store.getEvent(hit.ref_id)?.sensitivity_classification_state ?? null;
+  return ctx.store.getClaim(hit.ref_id)?.sensitivity_classification_state ?? null;
 }
 
 function snippet(text: string, q: string): string {

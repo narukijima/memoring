@@ -53,15 +53,14 @@ and neither the AI nor a future maintainer's edit may weaken them:
 - **The Gate is the sole egress predicate.** One conjunctive decision — Audience ×
   Aperture — runs *before* ranking on every recall surface. "Being a local file"
   is never a basis to surface anything. (§3 #11, #12, #17; Final Design §16;
-  `packages/core/policy.ts`.) Note: today this holds by *call-graph convention*,
-  not by a mechanism that fails on a future edit — and the four "channels" each
-  enforce a *channel-appropriate* floor, not a literal call to one shared
-  `gate()`. `context-pack.ts` calls `gate()`; `search.ts`/`mcp.ts` enforce a
-  query-time filter chain + index-time exclusion that never indexes
-  secret/unknown/out-of-scope/sealed rows; `extractor.ts` re-checks the remote
-  predicate block before a prompt leaves the device. Hardening this convention
-  into a *failing test* on every egress sink — including the `export` derivative
-  surface — is FLOOR-track work, not a new invariant.
+  `packages/core/policy.ts`.) The channels enforce a *channel-appropriate* floor,
+  not always a literal call to one shared `gate()`: `context-pack.ts` calls
+  `gate()` per item; `search.ts`/`mcp.ts` enforce a query-time filter chain plus
+  index-time exclusion; `extractor.ts` re-checks the remote predicate block before
+  a prompt leaves the device. The FLOOR hardening track added failing structural
+  and cross-channel tests around these sinks (`floor-callgraph`,
+  `cross-channel-egress`, `cross-scope-containment`); any future egress sink must
+  add an equivalent failing test instead of relying on convention.
 - **Sensitivity has a hard floor.** `secret` and `unknown` are never raw-emitted
   at any Aperture; `confidential` requires one-shot explicit confirmation. The
   default is Silence. (§3 #9, #17; `enums.ts` `maxSensitivityOf`.)
@@ -121,23 +120,28 @@ work. (§3 #1, #11; "Context is recalled, not dumped.")
 
 One precise boundary lives inside this belief and must not be smudged:
 `valid_recall_count` (`claim/lifecycle.ts:14`) is, by deliberate design,
-*external re-confirmation only — context.md inclusion is NOT counted*. Reviving
-recall signals (B4) means populating a **separate** recall-event signal
-(`last_recalled_at` + a recall counter); it must not silently fold context.md
-inclusion into `valid_recall_count`, or it overwrites an intentional semantic.
+*external re-confirmation only*. The association/recall track now records
+ContextPack **current-guidance emission** through a separate recall signal
+(`claim_recall_count:<claim_id>` metadata + `last_recalled_at`), only after the
+claim has passed the Gate and survived final token-budget rendering. That signal
+may tune reinforcement for later ranking, but it is not evidence, not authority,
+and not the lifecycle field named `valid_recall_count`.
 
 ### B4 — The "set" / binding is the real frontier, and it is underbuilt
 
 Humans re-surface memories bound to strong parameters — emotion, senses, place.
 The AI analog is a **salience binding**: signals (recency, repetition, surprise,
 source-trust, user-pin, co-occurrence, scope) that attach to a memory and drive
-associative recall as a *set*. Today this exists only as a partly-frozen
-reinforcement scalar and one link type (claim→evidence); `last_recalled_at`
-(`entities.ts:137`) is only ever written null, `supersedes[]` (`entities.ts:140`)
-is always `[]`, and the recall/age inputs to `reinforcement()` are always passed
-0. Most signals are wired but never driven. This is the single largest gap versus
-the stated center of gravity, and it is *named as future work, not a defect to
-hide*. (Anchors: §2 Design Philosophy; reinforcement model in `claim/lifecycle.ts`,
+associative recall as a *set*. The first implementation slice now exists:
+`buildContext` records rendered current-guidance recall via `recordRecall()`,
+which updates a separate meta counter, `last_recalled_at`, and reinforcement for
+the next ranking pass; genuine replacements populate `supersedes[]`; and
+`proposeNeighbors()` performs one-hop association over those supersede links.
+This is deliberately narrow. The broader binding frontier remains underbuilt:
+co-occurrence edges, semantic recall, source-trust weighting, user pins, richer
+surprise/recency signals, and agentic multi-hop traversal are still future ADR
+work. (Anchors: §2 Design Philosophy; reinforcement model in
+`claim/lifecycle.ts`, `claim/recall.ts`, `retrieval/associate.ts`,
 `core/recipe.ts`.)
 
 ### B5 — Links are scope-aware edges: association proposes, the Gate disposes
@@ -151,13 +155,13 @@ the stricter `every()`-in-active-scope test (not the seed path's `some()`). Link
 live in the thin structural layer (refs / labels / salience); bodies stay free.
 The Gate disposes per-item at the two recall integration points
 (`retrieval/context-pack.ts`, `retrieval/search.ts`) — but only `context-pack.ts`
-actually calls `gate()`. A proposer therefore slots in on the `buildContext`
-path, where `gate(toGateItem(...), req)` is the structural per-item check; it must
-NOT resolve a neighbor's body on the search/MCP path (which has no reusable
-per-item `gate()` and would route around the index-eligibility filter). An edge to
-a forgotten/redacted claim must be **inert by construction** — validity is checked
-at read time (both endpoints must be live), so a physically-lingering edge can
-never revive content the forget floor erased. (Anchors: B1, B4; §3 #11.)
+actually calls `gate()`. The implemented proposer therefore runs only on the
+`buildContext` path, where `gate(toGateItem(...), req)` is the structural per-item
+check; it does NOT resolve a neighbor's body on the search/MCP path (which has no
+reusable per-item `gate()` and would route around the index-eligibility filter).
+An edge to a forgotten/redacted claim is **inert by construction** — validity is
+checked at read time (both endpoints must be live), so a physically-lingering edge
+can never revive content the forget floor erased. (Anchors: B1, B4; §3 #11.)
 
 ## Resolved tensions (do not relitigate)
 
@@ -207,8 +211,8 @@ non-negotiable, and why everything above it can be free.
   concepts) is **summarized by reference only**. Per the project guardrail it must
   not be re-derived or expanded outside Final Design §2.7 and the project plan §6.
   Read §2.7 there for the full treatment.
-- *How* to build the association/binding frontier (B4/B5) — a recall counter
-  feeding reinforcement, a supersedes chain, an associative proposer, co-occurrence
-  edges, semantic recall — is roadmap work tracked by ADR-0004 and ADR-0003's
+- Further association/binding work (B4/B5) beyond the implemented narrow slice —
+  co-occurrence edges, semantic recall, source-trust/user-pin signals, agentic
+  multi-hop traversal — is roadmap work tracked by ADR-0004 and ADR-0003's
   Deferred sections, each admissible only behind its own ADR that shows it does
   not cross the floor.

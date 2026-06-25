@@ -205,18 +205,17 @@ describe('cross-channel egress parity (G3/G4/G5 across context.md + search + MCP
     expect(remote.seen).toHaveLength(0);
   });
 
-  it('buildContext inclusion alone does not increase recall reinforcement (Ouroboros)', () => {
+  it('buildContext records recall only after gated current-guidance emission', () => {
     const ctx = seeded.realm.ctx;
     const claim = ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')[0]!;
     const beforeScore = claim.reinforcement_score;
-    const beforeRecalledAt = claim.last_recalled_at;
 
     expect(contextDoc(seeded)).toContain(claim.claim_id);
 
     const after = ctx.store.getClaim(claim.claim_id)!;
-    expect(getRecallCount(ctx, claim.claim_id)).toBe(0);
-    expect(after.reinforcement_score).toBe(beforeScore);
-    expect(after.last_recalled_at).toBe(beforeRecalledAt);
+    expect(getRecallCount(ctx, claim.claim_id)).toBe(1);
+    expect(after.reinforcement_score).toBeGreaterThanOrEqual(beforeScore);
+    expect(after.last_recalled_at).toBeTruthy();
   });
 
   it('remote pre-egress checks the same floor predicates as the local Gate', async () => {

@@ -11,7 +11,7 @@ import { textLooksContextInjected } from '@security/ouroboros';
 import { basePath } from '@core/paths';
 import { createReplicaAtRoot } from '../apps/cli/commands/init';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
-import { createIndexedReplica } from './helpers';
+import { createIndexedReplica, putIndexedClaimWithStates } from './helpers';
 
 /** Output provider that records calls/prompts and returns a canned reply — never a
  *  network call (mirrors the MockOutputProvider in ask.test.ts). */
@@ -106,6 +106,22 @@ describe('chat per-turn core — grounding, Silence, Ouroboros, continuity (ADR-
     expect(out.grounded).toBe(true);
     expect(mock.calls).toBe(1);
     expect(mock.prompts[0]!).toContain('better-sqlite3');
+  });
+
+  it('remote output retrieval uses the remote_ai_processing audience and withholds candidate scope', async () => {
+    const statement = 'candidate scoped output only chat token';
+    putIndexedClaimWithStates(seeded.realm.ctx, statement, active, ['proj_test']);
+
+    const local = new MockOutputProvider('local', 'Local answer.');
+    const localOut = await chatTurn(seeded.realm.ctx, local, [], statement, { activeLabelIds: active });
+    expect(localOut.grounded).toBe(true);
+    expect(local.calls).toBe(1);
+    expect(local.prompts[0]!).toContain(statement);
+
+    const remote = new MockOutputProvider('remote', 'Remote answer.');
+    const remoteOut = await chatTurn(seeded.realm.ctx, remote, [], statement, { activeLabelIds: active });
+    expect(remoteOut.grounded).toBe(false);
+    expect(remote.calls).toBe(0);
   });
 
   it('multi-turn: prior turns thread into the next prompt, but each turn retrieves on its own', async () => {

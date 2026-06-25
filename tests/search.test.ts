@@ -8,6 +8,7 @@ import { eventIdentity, sessionIdentity, sourceIdentity } from '@intake/identity
 import { seedRealmFromFixture, type SeededRealm } from './seed';
 import { runSecretScan } from '@security/secret-scan';
 import type { Assignment, MemEvent } from '@core/schema/entities';
+import { putIndexedClaimWithStates } from './helpers';
 
 let seeded: SeededRealm;
 let active: string[];
@@ -45,6 +46,25 @@ describe('search (FR-040..042, NFR-018)', () => {
   it('fails closed: no active scope → no results (G4/FR-042)', () => {
     expect(searchRealm(seeded.realm.ctx, 'indentation').length).toBe(0);
     expect(searchRealm(seeded.realm.ctx, 'indentation', { activeLabelIds: [] }).length).toBe(0);
+  });
+
+  it('applies remote_ai_processing state rules when requested by output egress', () => {
+    const scopeStatement = 'candidate scoped search audience token';
+    const sensitivityStatement = 'candidate sensitivity search audience token';
+    putIndexedClaimWithStates(seeded.realm.ctx, scopeStatement, active, ['proj_test']);
+    putIndexedClaimWithStates(seeded.realm.ctx, sensitivityStatement, active, ['proj_test'], {
+      scopeState: 'inferred',
+      sensitivityState: 'candidate',
+    });
+
+    expect(searchRealm(seeded.realm.ctx, scopeStatement, { activeLabelIds: active }).length).toBeGreaterThan(0);
+    expect(searchRealm(seeded.realm.ctx, sensitivityStatement, { activeLabelIds: active }).length).toBeGreaterThan(0);
+    expect(
+      searchRealm(seeded.realm.ctx, scopeStatement, { activeLabelIds: active, audience: 'remote_ai_processing' }),
+    ).toEqual([]);
+    expect(
+      searchRealm(seeded.realm.ctx, sensitivityStatement, { activeLabelIds: active, audience: 'remote_ai_processing' }),
+    ).toEqual([]);
   });
 
   it('excludes out-of-scope items when a non-matching scope is given (FR-042)', () => {

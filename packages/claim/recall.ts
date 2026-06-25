@@ -1,5 +1,6 @@
-// Recall accounting for explicit external re-confirmation only. ContextPack
-// inclusion itself is not a valid_recall_count or reinforcement signal.
+// Recall accounting for gated current-guidance emission. This is a separate
+// meta counter; it never mutates the lifecycle field named valid_recall_count
+// (external re-confirmation only) and never creates evidence authority.
 import type { RealmContext } from '@core/runtime';
 import type { Claim } from '@core/schema/entities';
 import { reinforcement } from './lifecycle';
@@ -34,7 +35,8 @@ export function recomputeReinforcement(ctx: RealmContext, claim: Claim, now: Dat
   const score = reinforcement({
     current: claim.reinforcement_score,
     // The formula field is named after the original signal. The value here is
-    // the separate build-context recall counter, not external valid_recall_count.
+    // the separate current-guidance emission counter, not external
+    // valid_recall_count.
     valid_recall_count: getRecallCount(ctx, claim.claim_id),
     user_pin: 0,
     independent_evidence_count: claim.evidence_count,

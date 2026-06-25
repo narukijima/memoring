@@ -11,13 +11,14 @@ import { createLocalKeyMaterial } from '@security/key-lifecycle';
 import { ensureDir, atomicWriteFile } from '@storage/fs-safety';
 import { REPLICA_SUBDIRS } from '@core/paths';
 import { createReplicaAtRoot } from '../apps/cli/commands/init';
-import { indexEvent } from '@retrieval/search';
+import { indexClaim, indexEvent } from '@retrieval/search';
 import { SCHEMA_VERSION } from '@core/schema/versions';
 import { normalizeLabel } from '@core/label-normalize';
 import { realmHmac } from '@security/crypto-primitives';
 import { runSecretScan } from '@security/secret-scan';
 import { eventIdentity, sessionIdentity, sourceIdentity } from '@intake/identity';
-import type { Assignment, Label, MemEvent } from '@core/schema/entities';
+import type { ClassificationState } from '@core/schema/enums';
+import type { Assignment, Claim, Label, MemEvent } from '@core/schema/entities';
 
 export interface TempRealm {
   ctx: RealmContext;
@@ -143,4 +144,89 @@ export function createIndexedReplica(root: string, name: string, projectRoot: st
   } finally {
     ctx.close(true);
   }
+}
+
+export function putIndexedClaimWithStates(
+  ctx: RealmContext,
+  statement: string,
+  labelIds: string[],
+  projectIds: string[],
+  opts: { scopeState?: ClassificationState; sensitivityState?: ClassificationState } = {},
+): Claim {
+  const now = new Date().toISOString();
+  const scopeState = opts.scopeState ?? 'candidate';
+  const sensitivityState = opts.sensitivityState ?? 'inferred';
+  const eventId = newId('event');
+  const src = sourceIdentity(ctx.realmKey, 'test', `${eventId}-source`);
+  const ses = sessionIdentity(ctx.realmKey, src, `${eventId}-session`);
+  const event: MemEvent = {
+    event_id: eventId,
+    event_identity: eventIdentity(ctx.realmKey, src, ses, `${eventId}-message`, statement),
+    realm_id: ctx.realmId,
+    occurrence_ids: [newId('occurrence')],
+    session_id: `ses_${eventId}`,
+    turn_id: null,
+    event_type: 'message',
+    role: 'user',
+    origin: 'user',
+    created_at: now,
+    source_timestamp: null,
+    timestamp_confidence: 'capture_observed',
+    sequence: 20_000,
+    text_ref: null,
+    source_extra_ref: null,
+    sensitivity: 'internal',
+    sensitivity_classification_state: sensitivityState,
+    context_injected: false,
+    context_pack_digest: null,
+    parser_version: 'test.v1',
+    status: 'active',
+    schema_version: SCHEMA_VERSION.event,
+  };
+  ctx.store.putEvent(event);
+  ctx.store.putAssignment({
+    assignment_id: newId('assignment'),
+    realm_id: ctx.realmId,
+    target_type: 'event',
+    target_id: eventId,
+    label_ids: labelIds,
+    project_ids: projectIds,
+    classification_state: scopeState,
+    assigned_by: scopeState === 'candidate' ? 'ai' : 'rule:path_git_remote',
+    confidence: 0.6,
+    evidence: event.occurrence_ids,
+    created_by_derivation_id: null,
+    created_at: now,
+    schema_version: SCHEMA_VERSION.assignment,
+  });
+  const claim: Claim = {
+    claim_id: newId('claim'),
+    realm_id: ctx.realmId,
+    kind: 'fact',
+    statement_ref: ctx.objects.put(`${newId('claim')}_stmt`, Buffer.from(statement, 'utf8')).ref,
+    structured_predicate_ref: null,
+    assignment_ids: [],
+    project_ids: projectIds,
+    abstraction_level: 1,
+    status: 'consolidated',
+    conflict_reason: null,
+    evidence_event_identities: [event.event_identity],
+    evidence_occurrence_ids: event.occurrence_ids,
+    created_by: 'ai',
+    created_by_derivation_id: null,
+    created_at: now,
+    last_recalled_at: null,
+    valid_from: now,
+    valid_until: null,
+    supersedes: [],
+    evidence_count: 1,
+    reinforcement_score: 0,
+    confidence: 0.6,
+    sensitivity: 'internal',
+    sensitivity_classification_state: sensitivityState,
+    schema_version: SCHEMA_VERSION.claim,
+  };
+  ctx.store.putClaim(claim);
+  indexClaim(ctx, claim);
+  return claim;
 }
