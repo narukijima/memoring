@@ -14,6 +14,7 @@ import { TOKEN_BUDGET_RECIPE, type ContextPurpose } from '@core/recipe';
 import { estimateTokens } from '@core/token-estimate';
 import { log } from '@core/log';
 import { readClaimStatement } from '@claim/extractor';
+import { recordRecall } from '@claim/recall';
 import { isClaimSuppressed } from '@claim/seal';
 import { validateClaim } from '@claim/validator';
 import { resolveActiveLabelIds } from './active-scope';
@@ -263,6 +264,9 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     fullDoc = render();
   }
 
+  const renderedCurrentGuidance = renderedCurrentGuidanceClaims(bySection, caps);
+  const renderedCitations = renderedCitedClaims(bySection, conflictsOpen, staleOpen, caps);
+
   // 6. ContextPack manifest.
   const pack: ContextPack = {
     context_pack_id: packId,
@@ -281,7 +285,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     manifest_only: true,
     body_ref: null,
     self_ingestion_marker_digest: marker.digest,
-    evidence_ids: [...passed, ...conflictsOpen, ...staleOpen].map((p) => p.claim.claim_id),
+    evidence_ids: renderedCitations.map((p) => p.claim.claim_id),
     schema_version: SCHEMA_VERSION.contextPack,
   };
   ctx.store.putContextPack(pack);
@@ -290,8 +294,11 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   // 7. File safety (gate 7).
   writeContextFileSafely(opts.outPath, fullDoc, opts.cwd);
 
-  ctx.audit('context_pack_generate', { pack_id: packId, emitted: passed.length, dropped, audience, aperture }, now);
-  return { kind: 'written', outPath: opts.outPath, packId, emitted: passed.length, dropped };
+  recordRecall(ctx, renderedCurrentGuidance.map((sc) => sc.claim.claim_id), now);
+  ctx.flush();
+
+  ctx.audit('context_pack_generate', { pack_id: packId, emitted: renderedCurrentGuidance.length, dropped, audience, aperture }, now);
+  return { kind: 'written', outPath: opts.outPath, packId, emitted: renderedCurrentGuidance.length, dropped };
 }
 
 // Budget-group keys for the non-KIND sections (conflicts / stale warnings). Every
@@ -302,6 +309,35 @@ const STALE_KEY = '__stale__';
 // The constraints group is the safety floor (§3.6/§3.7): neither the allocator nor
 // the trim loop may drop it. Naming the key once keeps both enforcers in lock-step.
 const CONSTRAINTS_KEY = 'Constraints / do_not_do';
+const CURRENT_GUIDANCE_SECTIONS = [
+  'Current project facts',
+  'Pinned / consolidated memories',
+  'Recent decisions',
+  'Procedures',
+  CONSTRAINTS_KEY,
+];
+
+function renderedCurrentGuidanceClaims(bySection: Map<string, ScopedClaim[]>, caps: Map<string, number>): ScopedClaim[] {
+  const claims: ScopedClaim[] = [];
+  for (const title of CURRENT_GUIDANCE_SECTIONS) {
+    const items = bySection.get(title) ?? [];
+    claims.push(...items.slice(0, caps.get(title) ?? items.length));
+  }
+  return claims;
+}
+
+function renderedCitedClaims(
+  bySection: Map<string, ScopedClaim[]>,
+  conflictsOpen: ScopedClaim[],
+  staleOpen: ScopedClaim[],
+  caps: Map<string, number>,
+): ScopedClaim[] {
+  return [
+    ...renderedCurrentGuidanceClaims(bySection, caps),
+    ...conflictsOpen.slice(0, caps.get(CONFLICTS_KEY) ?? conflictsOpen.length),
+    ...staleOpen.slice(0, caps.get(STALE_KEY) ?? staleOpen.length),
+  ];
+}
 
 // Allocator reserves, derived empirically under estimateTokens (the §3.6 token
 // estimator). The allocator is only the first-pass cap; the measure-and-trim loop in

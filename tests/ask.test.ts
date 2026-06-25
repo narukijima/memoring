@@ -10,7 +10,7 @@ import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { textLooksContextInjected } from '@security/ouroboros';
 import { basePath } from '@core/paths';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
-import { createIndexedReplica } from './helpers';
+import { createIndexedReplica, putIndexedClaimWithStates } from './helpers';
 
 /** Output provider that records calls/prompts and returns a canned reply — never a
  *  network call (mirrors the RecordingProvider pattern in llm-provider.test.ts). */
@@ -93,6 +93,22 @@ describe('ask renderer core — grounding, Silence, Ouroboros (ADR-0011 §4/§5)
     expect(out.grounded).toBe(true);
     expect(mock.calls).toBe(1);
     expect(mock.prompts[0]!).toContain('better-sqlite3');
+  });
+
+  it('remote output retrieval uses the remote_ai_processing audience and withholds candidate scope', async () => {
+    const statement = 'candidate scoped output only ask token';
+    putIndexedClaimWithStates(seeded.realm.ctx, statement, active, ['proj_test']);
+
+    const local = new MockOutputProvider('local', 'Local answer.');
+    const localOut = await askRealm(seeded.realm.ctx, local, statement, { activeLabelIds: active });
+    expect(localOut.grounded).toBe(true);
+    expect(local.calls).toBe(1);
+    expect(local.prompts[0]!).toContain(statement);
+
+    const remote = new MockOutputProvider('remote', 'Remote answer.');
+    const remoteOut = await askRealm(seeded.realm.ctx, remote, statement, { activeLabelIds: active });
+    expect(remoteOut.grounded).toBe(false);
+    expect(remote.calls).toBe(0);
   });
 });
 

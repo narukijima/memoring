@@ -17,6 +17,7 @@
 import readline from 'node:readline';
 import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { resolveActiveProjects } from '@core/realm';
+import type { Audience } from '@core/schema/enums';
 import { searchRealmForQuestion, type SearchResult } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { getPassphrase } from '../prompt';
@@ -29,6 +30,10 @@ import { GROUNDING_INSTRUCTION, renderExcerpts, renderRendererMarker } from '../
 const CHAT_RENDERER_RECIPE = 'chat.v1';
 const NO_GROUNDED_MSG =
   '  No grounded answer for this scope. Nothing in the gated memory matches; not answering from outside knowledge.';
+
+function providerSearchAudience(provider: OutputProvider): Audience {
+  return provider.egress === 'remote' ? 'remote_ai_processing' : 'ai_tool';
+}
 
 /** One completed, grounded exchange — kept ONLY to give the model conversational
  *  continuity. `answer` is the clean synthesized prose (NOT the marker block): every
@@ -73,7 +78,10 @@ export async function chatTurn(
   opts: { activeLabelIds?: string[] } = {},
   now = new Date(),
 ): Promise<ChatOutcome> {
-  const { results } = searchRealmForQuestion(ctx, query, { activeLabelIds: opts.activeLabelIds });
+  const { results } = searchRealmForQuestion(ctx, query, {
+    activeLabelIds: opts.activeLabelIds,
+    audience: providerSearchAudience(provider),
+  });
   if (results.length === 0) return { grounded: false };
   const reply = (await provider.generate(buildChatPrompt(history, query, results))).trim();
   return { grounded: true, answer: `${reply}\n\n${renderRendererMarker(ctx, CHAT_RENDERER_RECIPE, now)}`, reply };

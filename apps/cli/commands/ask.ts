@@ -8,6 +8,7 @@
 // as evidence (§5c). One invocation binds to exactly one Realm (§3).
 import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { resolveActiveProjects } from '@core/realm';
+import type { Audience } from '@core/schema/enums';
 import { searchRealmForQuestion, type SearchResult } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { getPassphrase } from '../prompt';
@@ -19,6 +20,10 @@ import { GROUNDING_INSTRUCTION, renderExcerpts, renderRendererMarker } from '../
 // Identifies the renderer in the Ouroboros marker (the ask path has no token-budget
 // Recipe, unlike the ContextPack).
 const ASK_RENDERER_RECIPE = 'ask.v1';
+
+function providerSearchAudience(provider: OutputProvider): Audience {
+  return provider.egress === 'remote' ? 'remote_ai_processing' : 'ai_tool';
+}
 
 /** Build the one-shot grounding prompt from the gated excerpts (one query, v1 §2). */
 export function buildAskPrompt(query: string, results: SearchResult[]): string {
@@ -41,7 +46,10 @@ export async function askRealm(
   opts: { activeLabelIds?: string[] } = {},
   now = new Date(),
 ): Promise<AskOutcome> {
-  const { results } = searchRealmForQuestion(ctx, query, { activeLabelIds: opts.activeLabelIds });
+  const { results } = searchRealmForQuestion(ctx, query, {
+    activeLabelIds: opts.activeLabelIds,
+    audience: providerSearchAudience(provider),
+  });
   if (results.length === 0) return { grounded: false };
   const raw = await provider.generate(buildAskPrompt(query, results));
   return { grounded: true, answer: `${raw.trim()}\n\n${renderRendererMarker(ctx, ASK_RENDERER_RECIPE, now)}` };

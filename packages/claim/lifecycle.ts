@@ -11,7 +11,7 @@ const saturate = (n: number): number => n / (n + REINFORCEMENT_RECIPE.k);
 
 export interface ReinforcementSignals {
   current: number;
-  valid_recall_count: number; // external re-confirmation only; context.md inclusion NOT counted
+  valid_recall_count: number; // formula slot; Claim.valid_recall_count remains external-only
   user_pin: 0 | 1;
   independent_evidence_count: number;
   correction_count: number;
