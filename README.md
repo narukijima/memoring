@@ -171,6 +171,8 @@ Read on its own track (the "why" and the market framing):
   without an ADR, but a Recipe change must never break a structural invariant.
 - The frozen baseline is the specification only. **Implementation code is a separate phase** and
   does not modify the frozen invariants without an ADR.
+- Operating the loop under automation or AI agents follows the operator discipline in
+  [docs/operations/loop-engineering.md](docs/operations/loop-engineering.md) (non-normative).
 
 ## License
 
