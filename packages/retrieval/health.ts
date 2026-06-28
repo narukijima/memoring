@@ -39,10 +39,6 @@ function statement(ctx: RealmContext, claim: Claim): string {
   return readClaimStatement(ctx, claim).replace(/\s+/g, ' ').trim();
 }
 
-function short(value: string, max = 100): string {
-  return value.length <= max ? value : `${value.slice(0, max - 1)}...`;
-}
-
 function eventScopeState(ctx: RealmContext, event: MemEvent): ClassificationState | null {
   const assignments = ctx.store.listAssignmentsForTarget('event', event.event_id);
   if (assignments.length === 0) return null;
@@ -88,21 +84,33 @@ export function buildHealthReport(ctx: RealmContext, now = new Date()): HealthRe
     const scope = claimScope(ctx, claim);
     bump(report.counts.scopeStates, scope.scopeState);
 
-    const text = statement(ctx, claim);
     if (claim.status === 'conflicted') {
-      report.conflictingClaims.push({ id: claim.claim_id, message: `${claim.conflict_reason ?? 'conflicted'}: ${short(text)}` });
-    }
-    if (claim.status === 'superseded' || expired(claim, now)) {
-      report.staleClaims.push({ id: claim.claim_id, message: `${claim.status}${expired(claim, now) ? ' expired' : ''}: ${short(text)}` });
-    }
-    if (claim.status === 'consolidated' && validateClaim(ctx, claim, text).decision !== 'consolidated') {
-      report.weakEvidence.push({ id: claim.claim_id, message: `provenance/evidence no longer validates: ${short(text)}` });
-    }
-    if (claim.status === 'consolidated' && (scope.labelIds.length === 0 || scope.scopeState === null || scope.scopeState === 'candidate')) {
-      report.weakScopeAssignments.push({
+      report.conflictingClaims.push({
         id: claim.claim_id,
-        message: `scope=${scope.scopeState ?? 'missing'} labels=${scope.labelIds.length}: ${short(text)}`,
+        message: `reason=${claim.conflict_reason ?? 'conflicted'} status=${claim.status} sensitivity=${claim.sensitivity}`,
       });
+    }
+    const isExpired = expired(claim, now);
+    if (claim.status === 'superseded' || isExpired) {
+      report.staleClaims.push({
+        id: claim.claim_id,
+        message: `status=${claim.status}${isExpired ? ' expired=true' : ''} sensitivity=${claim.sensitivity}`,
+      });
+    }
+    if (claim.status === 'consolidated') {
+      const text = statement(ctx, claim);
+      if (validateClaim(ctx, claim, text).decision !== 'consolidated') {
+        report.weakEvidence.push({
+          id: claim.claim_id,
+          message: `provenance/evidence no longer validates; status=${claim.status} sensitivity=${claim.sensitivity} evidence=${claim.evidence_count}`,
+        });
+      }
+      if (scope.labelIds.length === 0 || scope.scopeState === null || scope.scopeState === 'candidate') {
+        report.weakScopeAssignments.push({
+          id: claim.claim_id,
+          message: `scope=${scope.scopeState ?? 'missing'} labels=${scope.labelIds.length} sensitivity=${claim.sensitivity}`,
+        });
+      }
     }
   }
 
@@ -143,4 +151,3 @@ export function buildHealthReport(ctx: RealmContext, now = new Date()): HealthRe
 
   return report;
 }
-

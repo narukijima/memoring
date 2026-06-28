@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildHealthReport } from '@retrieval/health';
 import { newId } from '@core/schema/ids';
+import { renderHealthReport } from '../apps/cli/commands/health';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
 
 describe('memoring health — read-only advisory diagnostics', () => {
@@ -65,5 +66,71 @@ describe('memoring health — read-only advisory diagnostics', () => {
     expect(report.weakScopeAssignments.length).toBeGreaterThan(0);
     expect(report.unsafeOutputCandidates).toEqual([]);
   });
-});
 
+  it('does not include claim statement text in health issue messages or rendered output', () => {
+    const ctx = seeded.realm.ctx;
+    const base = ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')[0]!;
+    const sentinel = 'HEALTH_SECRET_SHOULD_NOT_LEAK_12345';
+    const secretLike = 'sk-proj-health-secret-span-should-not-leak-12345';
+    const now = new Date().toISOString();
+
+    const cases = [
+      { suffix: 'secret-conflict', sensitivity: 'secret' as const, status: 'conflicted' as const, conflict_reason: 'counter_evidence' },
+      {
+        suffix: 'confidential-stale',
+        sensitivity: 'confidential' as const,
+        status: 'superseded' as const,
+        valid_until: '2000-01-01T00:00:00.000Z',
+      },
+      { suffix: 'unknown-weak-evidence', sensitivity: 'unknown' as const, status: 'consolidated' as const, clearEvidence: true },
+      {
+        suffix: 'secret-span-conflict',
+        sensitivity: 'internal' as const,
+        status: 'conflicted' as const,
+        conflict_reason: 'counter_evidence',
+        statementSuffix: secretLike,
+      },
+    ];
+
+    for (const item of cases) {
+      const claimId = newId('claim');
+      const statementRef = ctx.objects.put(
+        `${claimId}_stmt`,
+        Buffer.from(`${sentinel} ${item.suffix} ${item.statementSuffix ?? ''}`, 'utf8'),
+      ).ref;
+      ctx.store.putClaim({
+        ...base,
+        claim_id: claimId,
+        statement_ref: statementRef,
+        status: item.status,
+        conflict_reason: item.conflict_reason ?? null,
+        evidence_event_identities: item.clearEvidence ? [] : base.evidence_event_identities,
+        evidence_occurrence_ids: item.clearEvidence ? [] : base.evidence_occurrence_ids,
+        evidence_count: item.clearEvidence ? 0 : base.evidence_count,
+        sensitivity: item.sensitivity,
+        valid_until: item.valid_until ?? null,
+        created_at: now,
+      });
+    }
+
+    const report = buildHealthReport(ctx);
+    const issueMessages = [
+      ...report.conflictingClaims,
+      ...report.staleClaims,
+      ...report.weakEvidence,
+      ...report.weakScopeAssignments,
+      ...report.unsafeOutputCandidates,
+    ]
+      .map((issue) => issue.message)
+      .join('\n');
+    const rendered = renderHealthReport(report).join('\n');
+
+    expect(issueMessages).not.toContain(sentinel);
+    expect(issueMessages).not.toContain(secretLike);
+    expect(rendered).not.toContain(sentinel);
+    expect(rendered).not.toContain(secretLike);
+    expect(issueMessages).toContain('sensitivity=secret');
+    expect(issueMessages).toContain('sensitivity=confidential');
+    expect(issueMessages).toContain('sensitivity=unknown');
+  });
+});
