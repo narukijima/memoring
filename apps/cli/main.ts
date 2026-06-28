@@ -23,6 +23,7 @@ import { cmdImport } from './commands/import';
 import { cmdConfig } from './commands/config';
 import { cmdStatus } from './commands/status';
 import { cmdHealth } from './commands/health';
+import { cmdAtlas } from './commands/atlas';
 import { versionLine } from '@core/version';
 
 const QUICK_HELP = `Memoring
@@ -84,6 +85,7 @@ Usage:
   memoring sync                          Friendly alias for backfill.
   memoring status                        Show the current memory, model, and scopes.
   memoring health                        Read-only advisory diagnostics for claims, scopes, and Gate candidates.
+  memoring atlas build                   Generate .memoring/atlas/ read-only Markdown projection.
   memoring watch                         Resident diff-driven loop; holds the key/lock only per diff.
   memoring context build [opts]          Generate .memoring/context.md through the Gate (main exit).
       --out <path>                       Default .memoring/context.md
@@ -183,6 +185,8 @@ async function main(): Promise<number> {
       return cmdStatus(rest);
     case 'health':
       return cmdHealth(rest);
+    case 'atlas':
+      return cmdAtlas(rest);
     case 'context':
       return cmdContextBuild(rest); // `build` arrives as a positional and is ignored
     case 'search':
