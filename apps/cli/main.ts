@@ -97,6 +97,8 @@ Usage:
                                           Grounded natural-language answer over gated memory (output-layer
                                           LLM; downstream of the Gate, read-only). Local model by default;
                                           remote stays opt-in. Silence on no grounded match (ADR-0011).
+      --save artifact                    Save the post-gate answer as a derived artifact
+                                          (authority=derived, can_be_evidence=false).
   memoring chat [--scope <l>] [--show-marker]
                                           Interactive chat with ONE Realm. Natural-language prose is a
                                           GROUNDED memory question (same gated/grounded guarantees as ask).

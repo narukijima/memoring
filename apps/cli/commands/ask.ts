@@ -6,6 +6,8 @@
 // fabrication (the Silence invariant extended to the renderer, §4). The printed
 // answer carries the Ouroboros self-generated marker so it can never launder back in
 // as evidence (§5c). One invocation binds to exactly one Realm (§3).
+import fs from 'node:fs';
+import path from 'node:path';
 import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { resolveActiveProjects } from '@core/realm';
 import { searchRealmForQuestion, type SearchResult } from '@retrieval/search';
@@ -16,6 +18,7 @@ import { printActiveRealmSilence } from './resolve';
 import { resolveOutputProvider, type OutputProvider } from '../output-provider';
 import { GROUNDING_INSTRUCTION, renderExcerpts, renderRendererMarker, stripRendererMarker } from '../output-render';
 import { searchAudienceFor } from '../egress';
+import { atomicWriteFile } from '@storage/fs-safety';
 
 // Identifies the renderer in the Ouroboros marker (the ask path has no token-budget
 // Recipe, unlike the ContextPack).
@@ -27,6 +30,60 @@ export function buildAskPrompt(query: string, results: SearchResult[]): string {
 }
 
 export type AskOutcome = { grounded: false } | { grounded: true; answer: string; citations: string[] };
+
+function ensureLocalExclude(rel: string): void {
+  const exclude = path.join(process.cwd(), '.git', 'info', 'exclude');
+  if (!fs.existsSync(exclude)) return;
+  const current = fs.readFileSync(exclude, 'utf8');
+  if (current.split(/\r?\n/).includes(rel)) return;
+  fs.appendFileSync(exclude, `${current.endsWith('\n') ? '' : '\n'}${rel}\n`, { mode: 0o600 });
+}
+
+function artifactName(now: Date): string {
+  return `ask-${now.toISOString().replace(/[:.]/g, '-')}.md`;
+}
+
+export function saveAskArtifact(ctx: RealmContext, query: string, outcome: Extract<AskOutcome, { grounded: true }>, now = new Date()): string {
+  const dir = path.resolve('.memoring', 'artifacts');
+  const memoringDir = path.resolve('.memoring');
+  if (fs.existsSync(memoringDir) && fs.lstatSync(memoringDir).isSymbolicLink()) {
+    throw new Error('.memoring is a symlink; refusing to write artifact');
+  }
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  ensureLocalExclude('.memoring/artifacts/');
+  const target = path.join(dir, artifactName(now));
+  const markerStart = outcome.answer.indexOf('```memoring-ouroboros');
+  const marker = markerStart >= 0 ? outcome.answer.slice(markerStart) : '';
+  const body = [
+    '---',
+    'authority: derived',
+    'can_be_evidence: false',
+    'source: post-gate synthesis',
+    'artifact_type: ask_answer',
+    `realm_id: ${ctx.realmId}`,
+    `created_at: ${now.toISOString()}`,
+    'cited_ids:',
+    ...outcome.citations.map((id) => `  - ${id}`),
+    '---',
+    '',
+    '# Ask Artifact',
+    '',
+    `Question: ${query}`,
+    '',
+    '## Answer',
+    '',
+    stripRendererMarker(outcome.answer),
+    '',
+    '## Citations',
+    '',
+    ...outcome.citations.map((id) => `- ${id}`),
+    '',
+    marker,
+    '',
+  ].join('\n');
+  atomicWriteFile(target, body, 0o600);
+  return target;
+}
 
 function shellArg(value: string): string {
   return JSON.stringify(value);
@@ -125,7 +182,11 @@ export async function cmdAsk(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const query = flags._.join(' ').trim();
   if (!query) {
-    console.error('Usage: memoring ask <question> [--scope <label>] [--project <id>] [--show-marker]');
+    console.error('Usage: memoring ask <question> [--scope <label>] [--project <id>] [--show-marker] [--save artifact]');
+    return 1;
+  }
+  if (flags.save !== undefined && flags.save !== 'artifact') {
+    console.error('  Unsupported --save value. Use: --save artifact');
     return 1;
   }
   const opened = await openResolvedRealm(flags, getPassphrase);
@@ -156,6 +217,11 @@ export async function cmdAsk(argv: string[]): Promise<number> {
       return 0;
     }
     console.log(flags['show-marker'] === true ? outcome.answer : stripRendererMarker(outcome.answer));
+    if (flags.save === 'artifact') {
+      const target = saveAskArtifact(ctx, query, outcome);
+      console.log(`  Saved artifact: ${target}`);
+      console.log('  authority=derived can_be_evidence=false');
+    }
     return 0;
   } finally {
     ctx.close(false);

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { askRealm, buildAskPrompt, cmdAsk } from '../apps/cli/commands/ask';
+import { askRealm, buildAskPrompt, cmdAsk, saveAskArtifact } from '../apps/cli/commands/ask';
 import { resolveOutputProvider, type OutputProvider } from '../apps/cli/output-provider';
 import { createReplicaAtRoot } from '../apps/cli/commands/init';
 import { searchRealm, type SearchResult } from '@retrieval/search';
@@ -82,6 +82,31 @@ describe('ask renderer core — grounding, Silence, Ouroboros (ADR-0011 §4/§5)
     if (out.grounded) {
       expect(out.answer).toContain('The project uses better-sqlite3.'); // the synthesized answer
       expect(textLooksContextInjected(out.answer)).toBe(true); // Ouroboros marker attached
+    }
+  });
+
+  it('saveAskArtifact writes a derived non-evidence artifact without creating Claims', async () => {
+    const mock = new MockOutputProvider('local', 'The project uses better-sqlite3.');
+    const beforeClaims = seeded.realm.ctx.store.listClaims(seeded.realm.ctx.realmId).length;
+    const out = await askRealm(seeded.realm.ctx, mock, 'better-sqlite3', { activeLabelIds: active });
+    expect(out.grounded).toBe(true);
+    if (!out.grounded) return;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'memoring-ask-artifact-'));
+    const prev = process.cwd();
+    process.chdir(dir);
+    try {
+      const target = saveAskArtifact(seeded.realm.ctx, 'better-sqlite3', out, new Date('2026-06-28T00:00:00.000Z'));
+      const body = fs.readFileSync(target, 'utf8');
+      expect(body).toContain('authority: derived');
+      expect(body).toContain('can_be_evidence: false');
+      expect(body).toContain('source: post-gate synthesis');
+      expect(body).toContain('cited_ids:');
+      expect(body).toContain(out.citations[0]!);
+      expect(textLooksContextInjected(body)).toBe(true);
+      expect(seeded.realm.ctx.store.listClaims(seeded.realm.ctx.realmId)).toHaveLength(beforeClaims);
+    } finally {
+      process.chdir(prev);
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -311,6 +336,16 @@ describe('cmdAsk end-to-end (dispatch → scope gate → render)', () => {
     process.env = { ...env };
     process.chdir(cwd);
     fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('unsupported --save value is rejected before opening a Realm or model path', async () => {
+    process.env.MEMORING_LLM_BASE_URL = 'https://api.deepseek.com/v1';
+    process.env.MEMORING_LLM_MODEL = 'deepseek-chat';
+
+    expect(await cmdAsk(['better-sqlite3', '--save', 'claim'])).toBe(1);
+    expect(errors.join('\n')).toContain('Unsupported --save value');
+    expect(errors.join('\n')).not.toContain('MEMORING_LLM_REMOTE_OPT_IN');
+    expect(logs).toEqual([]);
   });
 
   it('ambiguous scope → Silence, returning BEFORE provider resolution (no LLM path)', async () => {
