@@ -116,7 +116,6 @@ describe('mechanical floor callgraph guardrails', () => {
         'deleteUndiluted',
         'forgetClaim',
         'forgetByPattern',
-        'redactEvent',
         'redactEventById',
         'allowedSensitivity',
         'allowedSensitivityState',

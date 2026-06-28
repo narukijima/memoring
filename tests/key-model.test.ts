@@ -18,8 +18,10 @@ import { type RealmConfig, writeRealmConfig } from '@core/realm';
 import {
   createKeyMaterial,
   createLocalKeyMaterial,
+  rekeyFromRecovery,
   unlockWithPassphrase,
   unlockWithRecovery,
+  WrongCredentialError,
 } from '@security/key-lifecycle';
 import { ensureDir, atomicWriteFile } from '@storage/fs-safety';
 
@@ -148,5 +150,34 @@ describe('opt-in passphrase mode', () => {
       viaPass.dispose();
       viaRecovery.dispose();
     }
+  });
+
+  it('rekey --recovery resets a lost passphrase via the recovery code, preserving realm_key', () => {
+    const { root, recoveryCode } = setupRealm('passphrase');
+    const bundle = loadKeyBundle(replicaLayout(root));
+    const original = unlockWithPassphrase(bundle, PASS);
+
+    const NEWPASS = 'a-brand-new-strong-passphrase';
+    const next = rekeyFromRecovery(bundle, recoveryCode!, NEWPASS);
+    // The old passphrase no longer opens it; the new one does.
+    expect(() => unlockWithPassphrase(next, PASS)).toThrow(WrongCredentialError);
+    const viaNew = unlockWithPassphrase(next, NEWPASS);
+    // The recovery wrap is untouched, so the same recovery code still works.
+    const viaRecovery = unlockWithRecovery(next, recoveryCode!);
+    try {
+      expect(viaNew.realmKey.equals(original.realmKey)).toBe(true); // realm_key (identities/Seals) preserved
+      expect(viaNew.dekId).toBe(original.dekId); // same DEK — data survives
+      expect(viaRecovery.realmKey.equals(original.realmKey)).toBe(true);
+    } finally {
+      original.dispose();
+      viaNew.dispose();
+      viaRecovery.dispose();
+    }
+  });
+
+  it('rekey --recovery rejects a wrong recovery code', () => {
+    const { root } = setupRealm('passphrase');
+    const bundle = loadKeyBundle(replicaLayout(root));
+    expect(() => rekeyFromRecovery(bundle, '0000-0000-0000-0000', 'whatever-passphrase')).toThrow(WrongCredentialError);
   });
 });

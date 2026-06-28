@@ -9,6 +9,7 @@ import { isIndependentEvidenceOrigin } from '@core/schema/enums';
 import { getOrCreateLabel } from '@claim/classify';
 import { consolidatePending } from '@claim/consolidation';
 import { searchRealm, indexClaim, rebuildIndex } from '@retrieval/search';
+import { claimScope } from '@retrieval/claim-scope';
 import {
   ingestImport,
   listImportedCandidates,
@@ -255,6 +256,26 @@ describe('import from AI — non-authoritative intake + user promotion', () => {
     const ident = listImportedCandidates(ctx).find((c) => c.claim.kind === 'fact')!;
     expect(rejectImportedClaim(ctx, ident.claim.claim_id).ok).toBe(true);
     expect(ctx.store.getClaim(ident.claim.claim_id)?.status).toBe('rejected');
+  });
+
+  it('a promoted import resolves its scope via the shared claimScope fallback (search/context.md parity)', () => {
+    // ADR-0007: a promoted import carries NO evidence events; its scope lives only on its
+    // own Assignment. search.ts and context-pack.ts now derive scope through ONE shared
+    // retrieval/claim-scope helper, so an evidence-less promoted claim resolves the same
+    // label on every surface — previously context-pack lacked the fallback and derived
+    // labelIds:[], silently disagreeing with search. (Whether such a claim then passes
+    // the provenance gate is a separate, intentional check — see validateClaim.)
+    ingestImport(ctx, Buffer.from(CLAUDE_EXPORT, 'utf8'), { providerHint: 'claude' });
+    const pref = listImportedCandidates(ctx).find((c) => c.claim.kind === 'preference')!;
+    const outcome = promoteImportedClaim(ctx, pref.claim.claim_id, { scope: 'mystuff', sensitivity: 'internal' });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.claim.evidence_event_identities).toEqual([]); // evidence-less by construction
+
+    const label = getOrCreateLabel(ctx, 'mystuff', new Date());
+    const scope = claimScope(ctx, outcome.claim);
+    expect(scope.labelIds).toEqual([label.label_id]); // fallback to the claim's own Assignment
+    expect(scope.scopeState).toBe('confirmed');
   });
 
   it('promotion without a declared sensitivity is refused (no synthesized Declassify)', () => {

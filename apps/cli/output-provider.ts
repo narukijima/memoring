@@ -22,6 +22,7 @@ import { OpenAiCompatibleBackend, isLoopback } from '@integrations/llm/openai-co
 import type { LlmBackend } from '@claim/llm-provider';
 import { log } from '@core/log';
 import type { RealmLlmConfig } from '@core/realm';
+import { configEgressForBaseUrl, isTruthy } from './egress';
 
 /** Output-layer role: turn a grounding prompt into prose. Distinct from
  *  MemoryProvider (which only `abstract()`s); never overloads it (ADR-0011 §6). */
@@ -94,23 +95,8 @@ export function resolveOutputProvider(config?: RealmLlmConfig): OutputProvider |
     id: process.env.MEMORING_LLM_ID,
   });
   const provider = new LlmOutputProvider(backend);
-  log.info('ask:output_provider', { id: provider.id, egress: provider.egress });
+  log.debug('ask:output_provider', { id: provider.id, egress: provider.egress });
   return provider;
-}
-
-function configEgressForBaseUrl(
-  baseURL: string,
-  baseUrlFromEnv: string | undefined,
-  config: RealmLlmConfig | undefined,
-): 'local' | 'remote' | undefined {
-  if (baseUrlFromEnv !== undefined) return undefined;
-  if (config?.egress === 'remote') return 'remote';
-  if (config?.egress === 'local' && isLoopback(baseURL)) return 'local';
-  return undefined;
-}
-
-function isTruthy(v: string | undefined): boolean {
-  return v === '1' || v?.toLowerCase() === 'true' || v?.toLowerCase() === 'yes';
 }
 
 /** No usable output model. `memoring ask` cannot fabricate prose, so guide the owner

@@ -15,7 +15,6 @@ import { eventIdentity, sessionIdentity, sourceIdentity } from './identity';
 export interface NormalizeResult {
   events: MemEvent[];
   quarantined: number;
-  skipped: number;
   /** Genuine per-line JSON parse failures surfaced from the Parser (FR-013). */
   parseFailures: number;
   deduped: number;
@@ -80,7 +79,7 @@ export function normalizeOccurrence(
       created_at: now.toISOString(),
       schema_version: SCHEMA_VERSION.quarantine,
     });
-    return { events: [], quarantined: 1, skipped: 0, parseFailures: 0, deduped: 0 };
+    return { events: [], quarantined: 1, parseFailures: 0, deduped: 0 };
   }
 
   const srcIdentity = sourceIdentity(ctx.realmKey, source.connector_id, source.source_stable_id);
@@ -189,5 +188,5 @@ export function normalizeOccurrence(
     created.push(event);
   }
 
-  return { events: created, quarantined: 0, skipped: parsed.skipped, parseFailures: parsed.parseFailures, deduped };
+  return { events: created, quarantined: 0, parseFailures: parsed.parseFailures, deduped };
 }

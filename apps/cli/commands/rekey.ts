@@ -7,9 +7,9 @@
 import fs from 'node:fs';
 import { replicaLayout } from '@core/paths';
 import { assertKeyModeUnambiguous, isPassphraseMode, loadKeyBundle, loadLocalKey, replicaExists } from '@core/runtime';
-import { rekeyPassphrase, upgradeLocalToPassphrase } from '@security/key-lifecycle';
+import { rekeyFromRecovery, rekeyPassphrase, upgradeLocalToPassphrase } from '@security/key-lifecycle';
 import { atomicWriteFile } from '@storage/fs-safety';
-import { getPassphrase } from '../prompt';
+import { askHidden, getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 
 async function confirmNewPassphrase(prompt: string): Promise<string | null> {
@@ -42,20 +42,41 @@ export async function cmdRekey(argv: string[]): Promise<number> {
     return 1;
   }
 
-  // Passphrase vault → change the passphrase (re-wrap the DEK under a new KEK).
+  // Passphrase vault → change the passphrase (re-wrap the DEK under a new KEK). With
+  // --recovery, the OLD passphrase is unknown (lost): unlock via the one-time recovery
+  // code instead and set a fresh passphrase. The recovery code is read from
+  // MEMORING_RECOVERY_CODE (headless/tests) or prompted with echo muted — never taken
+  // as a CLI argument, so it does not land in shell history / the process list.
   if (isPassphraseMode(layout.root)) {
-    const oldPassphrase = await getPassphrase('Current passphrase: ');
-    const newPassphrase = await confirmNewPassphrase('New passphrase: ');
-    if (newPassphrase === null) return 1;
+    const useRecovery = flags.recovery === true || typeof flags.recovery === 'string';
     let next;
-    try {
-      next = rekeyPassphrase(loadKeyBundle(layout), oldPassphrase, newPassphrase);
-    } catch (e) {
-      console.error(`  ${(e as Error).message}`);
-      return 1;
+    if (useRecovery) {
+      const recoveryCode = process.env.MEMORING_RECOVERY_CODE ?? (await askHidden('Recovery code: '));
+      const newPassphrase = await confirmNewPassphrase('New passphrase: ');
+      if (newPassphrase === null) return 1;
+      try {
+        next = rekeyFromRecovery(loadKeyBundle(layout), recoveryCode, newPassphrase);
+      } catch (e) {
+        console.error(`  ${(e as Error).message}`);
+        return 1;
+      }
+    } else {
+      const oldPassphrase = await getPassphrase('Current passphrase: ');
+      const newPassphrase = await confirmNewPassphrase('New passphrase: ');
+      if (newPassphrase === null) return 1;
+      try {
+        next = rekeyPassphrase(loadKeyBundle(layout), oldPassphrase, newPassphrase);
+      } catch (e) {
+        console.error(`  ${(e as Error).message}`);
+        return 1;
+      }
     }
     atomicWriteFile(layout.keyBundle, JSON.stringify(next, null, 2), 0o600);
-    console.log('  Passphrase rotated. The DEK was re-wrapped (data, identities, and Seals unchanged).');
+    console.log(
+      useRecovery
+        ? '  Passphrase reset with your recovery code. The DEK was re-wrapped (data, identities, and Seals unchanged).'
+        : '  Passphrase rotated. The DEK was re-wrapped (data, identities, and Seals unchanged).',
+    );
     return 0;
   }
 
@@ -85,6 +106,8 @@ export async function cmdRekey(argv: string[]): Promise<number> {
   console.log('');
   console.log(`      ${recoveryCode}`);
   console.log('');
+  console.log('  If you forget your passphrase, reset it with this code:');
+  console.log('      memoring rekey --recovery');
   console.log('  If you lose BOTH your passphrase and this recovery code, the Realm cannot be');
   console.log('  decrypted. Memoring has no server-side recovery.');
   console.log('');

@@ -16,6 +16,7 @@ import { LlmMemoryProvider } from '@claim/llm-provider';
 import { OpenAiCompatibleBackend, isLoopback } from '@integrations/llm/openai-compatible';
 import { log } from '@core/log';
 import type { RealmLlmConfig } from '@core/realm';
+import { configEgressForBaseUrl, isTruthy } from './egress';
 
 export function resolveProvider(config?: RealmLlmConfig): MemoryProvider {
   const baseUrlFromEnv = process.env.MEMORING_LLM_BASE_URL;
@@ -71,23 +72,8 @@ export function resolveProvider(config?: RealmLlmConfig): MemoryProvider {
     id: process.env.MEMORING_LLM_ID,
   });
   const provider = new LlmMemoryProvider(backend);
-  log.info('provider:llm', { id: provider.id, egress: provider.egress, proxy });
+  log.debug('provider:llm', { id: provider.id, egress: provider.egress, proxy });
   return provider;
-}
-
-function configEgressForBaseUrl(
-  baseURL: string,
-  baseUrlFromEnv: string | undefined,
-  config: RealmLlmConfig | undefined,
-): 'local' | 'remote' | undefined {
-  if (baseUrlFromEnv !== undefined) return undefined;
-  if (config?.egress === 'remote') return 'remote';
-  if (config?.egress === 'local' && isLoopback(baseURL)) return 'local';
-  return undefined;
-}
-
-function isTruthy(v: string | undefined): boolean {
-  return v === '1' || v?.toLowerCase() === 'true' || v?.toLowerCase() === 'yes';
 }
 
 /** Remote AI is default-off (§7.3). Refuse off-device egress unless the user has

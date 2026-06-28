@@ -247,6 +247,27 @@ export function rekeyPassphrase(bundle: KeyBundle, oldPassphrase: string, newPas
   return next;
 }
 
+/** Reset the passphrase using the one-time recovery code (for a LOST passphrase,
+ *  FR-083): unlock the DEK via the recovery wrap and re-wrap the SAME DEK under a fresh
+ *  KEK from the new passphrase. Recovery wrap + root are untouched, so realm_key — every
+ *  identity / fingerprint / Seal — survives, and the same recovery code keeps working. */
+export function rekeyFromRecovery(bundle: KeyBundle, recoveryCode: string, newPassphrase: string): KeyBundle {
+  const keyring = unlockWithRecovery(bundle, recoveryCode); // validates the code, yields the DEK
+  try {
+    const kdfPp = defaultScryptParams();
+    const kekNew = deriveKeyFromSecret(newPassphrase, kdfPp);
+    const next: KeyBundle = {
+      ...bundle,
+      kdf_passphrase: kdfPp,
+      dek_wrapped_passphrase: aeadSeal(kekNew, keyring.dek).toString('base64'),
+    };
+    kekNew.fill(0);
+    return next;
+  } finally {
+    keyring.dispose(); // wipe DEK + realm_key from memory
+  }
+}
+
 /** Upgrade a passwordless local vault to a passphrase vault, reusing the SAME DEK
  *  and root (so realm_key/identities/Seals are preserved). The existing root R
  *  becomes the recovery secret, so a one-time recovery code is issued too. */

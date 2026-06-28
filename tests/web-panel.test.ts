@@ -31,6 +31,7 @@ const CANDIDATE_TEXT = 'Always respond in English.';
 interface Reply {
   status: number;
   headers: http.IncomingHttpHeaders;
+  raw: Buffer;
   text: string;
 }
 
@@ -59,7 +60,10 @@ function request(opts: {
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, text: Buffer.concat(chunks).toString('utf8') }));
+        res.on('end', () => {
+          const raw = Buffer.concat(chunks);
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, raw, text: raw.toString('utf8') });
+        });
       },
     );
     req.on('error', reject);
@@ -125,6 +129,18 @@ describe('web control panel — security gate + owner write surface', () => {
     const nonce = /script-src 'nonce-([^']+)'/.exec(String(csp))?.[1];
     expect(nonce).toBeTruthy();
     expect(r.text).toContain(`<script nonce="${nonce}">`);
+  });
+
+  it('serves the bundled Memoring logo as a token-exempt static asset', async () => {
+    const r = await request({ port: panel.port, path: '/assets/memoring-ring.svg' }); // no token
+    expect(r.status).toBe(200);
+    expect(r.headers['content-type']).toContain('image/svg+xml');
+    expect(r.text).toContain('<circle');
+
+    const png = await request({ port: panel.port, path: '/assets/memoring-ring.png' }); // no token
+    expect(png.status).toBe(200);
+    expect(png.headers['content-type']).toContain('image/png');
+    expect(png.raw.subarray(1, 4).toString('ascii')).toBe('PNG');
   });
 
   it('requires a valid token on EVERY /api/* request — read AND write', async () => {

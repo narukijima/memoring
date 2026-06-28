@@ -142,8 +142,19 @@ function printConnectPreview(realmId: string, sources: DetectedSource[], connect
   console.log('  [dry-run] Re-run without --dry-run to choose include/exclude + Realm and connect.');
 }
 
-export function printLoopStats(stats: LoopStats): void {
-  log.info('loop:done', { ...stats } as Record<string, number>);
+export function printLoopStats(stats: LoopStats, opts: { friendly?: boolean } = {}): void {
+  log.debug('loop:done', { ...stats } as Record<string, number>);
+  if (opts.friendly) {
+    console.log('  Synced connected history.');
+    console.log(`  New input: ${stats.captured}`);
+    console.log(`  New memories: ${stats.consolidated}`);
+    if (stats.quarantined > 0 || stats.parseFailures > 0 || stats.abstractFailures > 0) {
+      console.log(
+        `  Needs attention: quarantined=${stats.quarantined} parse_failures=${stats.parseFailures} abstract_failures=${stats.abstractFailures}`,
+      );
+    }
+    return;
+  }
   console.log(
     `  Loop: captured=${stats.captured} events=${stats.events} quarantined=${stats.quarantined} ` +
       `parse_failures=${stats.parseFailures} ` +
