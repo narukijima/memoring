@@ -70,12 +70,6 @@ function stageRedactEvent(ctx: RealmContext, event: MemEvent, now: Date): string
   return textRef;
 }
 
-/** Redact one Event: drop normalized text + object, keep event_identity, deindex. */
-export function redactEvent(ctx: RealmContext, event: MemEvent, now = new Date()): void {
-  const textRef = stageRedactEvent(ctx, event, now);
-  deleteObjectsAfterFlush(ctx, [textRef], 'redact');
-}
-
 /** After an evidence Event is gone, repair Claims that cited it. Also prunes any
  *  tombstoned occurrence_ids from the Claim's evidence_occurrence_ids (§7.3). */
 function repairClaimsCiting(

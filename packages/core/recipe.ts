@@ -108,15 +108,6 @@ export const TOKEN_BUDGET_RECIPE = {
    *  with a count). A density ceiling so a rich corpus stays a usable primer —
    *  a versioned tunable (CON-016/017), raise it for a fuller dump. */
   max_items_per_section: 15,
-  allocation: {
-    safety_header_scope: 0.1,
-    constraints: 0.15,
-    project_facts: 0.2,
-    consolidated_memories: 0.2,
-    recent_decisions_tasks: 0.2,
-    evidence_map: 0.1,
-    undiluted_excerpts: 0.05,
-  },
 } as const;
 
 export const PRUNE_RECIPE = {
@@ -127,5 +118,4 @@ export const PRUNE_RECIPE = {
     reason: 'initial values (Detailed Design §10.5)',
   } as RecipeMeta,
   merge_suggest_threshold: { embedding: 0.88, string: 0.92 },
-  suggest_max_per_init: 20,
 } as const;

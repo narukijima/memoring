@@ -11,7 +11,12 @@
 // no Gate/audience filter), so that endpoint is dedicated and owner-only (§3).
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { basePath } from '@core/paths';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { basePath, replicaLayout } from '@core/paths';
+import { readRealmConfig, writeRealmConfig } from '@core/realm';
+import { isLoopback } from '@integrations/llm/openai-compatible';
 import {
   ensureLegacyRegistered,
   getCurrent,
@@ -45,6 +50,10 @@ import { getConnector } from '@intake/registry';
 import type { DetectedSource } from '@intake/types';
 import { createRealm, deleteRealm, setActiveRealm, RealmActionError } from '../cli/realm-actions';
 import { renderShell } from './shell';
+
+const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const MEMORING_RING_SVG = fs.readFileSync(path.join(SERVER_DIR, 'assets', 'memoring-ring.svg'));
+const MEMORING_RING_PNG = fs.readFileSync(path.join(SERVER_DIR, 'assets', 'memoring-ring.png'));
 
 export const PANEL_HOST = '127.0.0.1';
 export const PANEL_DEFAULT_PORT = 4319;
@@ -205,6 +214,22 @@ function sendShell(res: ServerResponse, nonce: string): void {
   res.end(renderShell(nonce));
 }
 
+function sendSvg(res: ServerResponse, body: Buffer): void {
+  res.writeHead(200, {
+    'content-type': 'image/svg+xml; charset=utf-8',
+    'cache-control': 'no-store',
+  });
+  res.end(body);
+}
+
+function sendPng(res: ServerResponse, body: Buffer): void {
+  res.writeHead(200, {
+    'content-type': 'image/png',
+    'cache-control': 'no-store',
+  });
+  res.end(body);
+}
+
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -311,6 +336,76 @@ async function handleConnectDetect(res: ServerResponse, url: URL): Promise<void>
 
 function normalizeConnectorId(raw: string | null): string {
   return (raw ?? 'claude-code').replace(/-/g, '_');
+}
+
+// ── LLM model config (mirrors `memoring config` on the SAME realm.toml) ───────
+
+/** The active Realm's plaintext realm.toml — the SAME file the CLI `config`
+ *  command edits, so a model picked in the panel is the model the CLI uses. No
+ *  encrypted DB is opened: only non-secret provider coordinates live here. */
+function activeRealmToml(opts: PanelOptions): string {
+  return replicaLayout(opts.root).realmToml;
+}
+
+/** Best-effort model list from an OpenAI-compatible endpoint. Only LOOPBACK URLs
+ *  are queried — the panel never makes an off-device call — and any failure (or a
+ *  remote endpoint) yields []. The fetch carries no memory text: it lists models. */
+async function fetchEndpointModels(baseUrl: string): Promise<string[]> {
+  if (!isLoopback(baseUrl)) return [];
+  const url = baseUrl.replace(/\/+$/, '') + '/models';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const headers: Record<string, string> = {};
+    const key = process.env.MEMORING_LLM_API_KEY;
+    if (key) headers.authorization = `Bearer ${key}`;
+    const r = await fetch(url, { headers, signal: controller.signal });
+    if (!r.ok) return [];
+    const body = (await r.json()) as { data?: Array<{ id?: unknown }> };
+    if (!Array.isArray(body.data)) return [];
+    return body.data
+      .map((m) => (typeof m.id === 'string' ? m.id : ''))
+      .filter((id): id is string => id.length > 0)
+      .sort((a, b) => a.localeCompare(b));
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function handleLlm(res: ServerResponse, opts: PanelOptions): Promise<void> {
+  const llm = readRealmConfig(activeRealmToml(opts)).llm;
+  if (!llm) {
+    sendJson(res, 200, { configured: false, model: null, base_url: null, egress: null, loopback: false, models: [] });
+    return;
+  }
+  const models = await fetchEndpointModels(llm.base_url);
+  // Always surface the configured model even if discovery returned nothing
+  // (endpoint down, or a remote endpoint the panel does not query).
+  const merged = models.includes(llm.model) ? models : [llm.model, ...models];
+  sendJson(res, 200, {
+    configured: true,
+    model: llm.model,
+    base_url: llm.base_url,
+    egress: llm.egress ?? null,
+    loopback: isLoopback(llm.base_url),
+    models: merged,
+  });
+}
+
+async function handleLlmSetModel(res: ServerResponse, opts: PanelOptions, body: Record<string, unknown>): Promise<void> {
+  const model = str(body, 'model');
+  if (!model) throw new PanelError(400, 'model_required');
+  const tomlPath = activeRealmToml(opts);
+  const config = readRealmConfig(tomlPath);
+  if (!config.llm) throw new PanelError(409, 'llm_not_configured');
+  // Switch ONLY the model among those the already-configured endpoint serves;
+  // base_url/egress are preserved so the panel cannot change the egress posture
+  // (a local→remote switch stays a deliberate CLI/env operation).
+  config.llm = { ...config.llm, model };
+  writeRealmConfig(tomlPath, config);
+  sendJson(res, 200, { model });
 }
 
 // ── Write routes (Phase 2) ─────────────────────────────────────────────────
@@ -467,6 +562,7 @@ async function route(req: IncomingMessage, res: ServerResponse, opts: PanelOptio
     if (p === '/api/memories') return handleMemories(res, opts, url);
     if (p === '/api/import/candidates') return handleImportCandidates(res, opts, url.searchParams.get('realm') ?? undefined);
     if (p === '/api/connect/detect') return handleConnectDetect(res, url);
+    if (p === '/api/llm') return handleLlm(res, opts);
     throw new PanelError(404, 'not_found');
   }
 
@@ -478,6 +574,7 @@ async function route(req: IncomingMessage, res: ServerResponse, opts: PanelOptio
       if (p === '/api/realms' && method === 'DELETE') return handleDeleteRealm(res, body);
       if (p === '/api/realms/active' && method === 'POST') return handleSetActiveRealm(res, body);
       if (p === '/api/connect' && method === 'POST') return handleConnect(res, opts, body);
+      if (p === '/api/llm/model' && method === 'POST') return handleLlmSetModel(res, opts, body);
       if (p === '/api/import' && method === 'POST') return handleImport(res, opts, url, body);
       if (p === '/api/import/promote' && method === 'POST') return handlePromote(res, opts, url, body);
       if (p === '/api/import/reject' && method === 'POST') return handleReject(res, opts, url, body);
@@ -514,9 +611,17 @@ async function handle(req: IncomingMessage, res: ServerResponse, opts: PanelOpti
 
   const url = new URL(req.url ?? '/', `http://${PANEL_HOST}:${opts.port}`);
 
-  // GET / and /favicon.ico are token-EXEMPT (static, data-free) but Host-checked.
+  // GET /, favicon, and bundled assets are token-EXEMPT (static, data-free) but Host-checked.
   if (req.method === 'GET' && url.pathname === '/') {
     sendShell(res, generateNonce());
+    return;
+  }
+  if (req.method === 'GET' && url.pathname === '/assets/memoring-ring.svg') {
+    sendSvg(res, MEMORING_RING_SVG);
+    return;
+  }
+  if (req.method === 'GET' && url.pathname === '/assets/memoring-ring.png') {
+    sendPng(res, MEMORING_RING_PNG);
     return;
   }
   if (req.method === 'GET' && url.pathname === '/favicon.ico') {
@@ -553,11 +658,6 @@ export interface RunningPanel {
   port: number;
   token: string;
   url: string;
-}
-
-/** Create (but do not start) the panel HTTP server. */
-export function createPanelServer(opts: PanelOptions): http.Server {
-  return http.createServer(createRequestHandler(opts));
 }
 
 /** Start the panel on `opts.port` (0 = an ephemeral port, for tests) and resolve

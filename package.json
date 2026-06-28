@@ -28,7 +28,8 @@
     "LICENSE"
   ],
   "bin": {
-    "memoring": "bin/memoring.mjs"
+    "memoring": "bin/memoring.mjs",
+    "Memoring": "bin/memoring.mjs"
   },
   "scripts": {
     "memoring": "tsx apps/cli/main.ts",

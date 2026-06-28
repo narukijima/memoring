@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { searchRealm, searchRealmForQuestion, queryCandidates, rebuildIndex, indexEvent } from '@retrieval/search';
+import { searchRealm, searchRealmForQuestion, queryCandidates, rebuildIndex, indexEvent, browseRealm, readClaimById } from '@retrieval/search';
 import { handleMcpRequest } from '@retrieval/mcp';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { newId } from '@core/schema/ids';
@@ -36,6 +36,16 @@ describe('search (FR-040..042, NFR-018)', () => {
     });
     expect(out.results.length).toBeGreaterThan(0);
     expect(out.queries).toContain('better-sqlite3');
+  });
+
+  it('merges results from multiple concrete terms instead of stopping after the first hit', () => {
+    const out = searchRealmForQuestion(seeded.realm.ctx, 'better-sqlite3 and indentation', {
+      activeLabelIds: active,
+    });
+    expect(out.queries).toContain('better-sqlite3');
+    expect(out.queries).toContain('indentation');
+    expect(out.results.some((r) => r.snippet.includes('better-sqlite3'))).toBe(true);
+    expect(out.results.some((r) => r.snippet.includes('indentation'))).toBe(true);
   });
 
   it('never returns the secret text (G3 / CON-007)', () => {
@@ -194,5 +204,43 @@ describe('search (FR-040..042, NFR-018)', () => {
     const body = JSON.parse(resp!);
     expect(body.result.content[0].text).toContain('No matches.');
     expect(body.result.content[0].text).not.toContain(text);
+  });
+});
+
+describe('browseRealm / readClaimById — gated, keyword-free retrieval for the agent', () => {
+  it('browseRealm lists in-scope consolidated claims with their full statements (no keyword)', () => {
+    const rows = browseRealm(seeded.realm.ctx, { activeLabelIds: active });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.ref_type === 'claim')).toBe(true);
+    expect(rows.some((r) => r.statement.includes('better-sqlite3'))).toBe(true); // full text, not a snippet
+  });
+
+  it('browseRealm fails closed on an empty active scope (no Realm-wide browse)', () => {
+    expect(browseRealm(seeded.realm.ctx, { activeLabelIds: [] })).toEqual([]);
+  });
+
+  it('browseRealm/readClaimById apply the canonical provenance Gate (validateClaim), tighter than index-only searchRealm', () => {
+    const statement = 'provenance-deficient agent browse token';
+    const claim = putIndexedClaimWithStates(seeded.realm.ctx, statement, active, ['proj_test']);
+    // The looser index path (searchRealm, like the MCP/search surface) still surfaces it…
+    expect(searchRealm(seeded.realm.ctx, statement, { activeLabelIds: active }).length).toBeGreaterThan(0);
+    // …but the agent browse/read re-validate provenance and drop it, matching the
+    // ContextPack / /recent surfaces — so the agent egress path is never looser (review #1).
+    expect(browseRealm(seeded.realm.ctx, { activeLabelIds: active }).some((r) => r.statement.includes(statement))).toBe(false);
+    expect(readClaimById(seeded.realm.ctx, claim.claim_id, { activeLabelIds: active })).toBeNull();
+  });
+
+  it('readClaimById returns the gated statement for an in-scope id, null for a bogus one', () => {
+    const rows = browseRealm(seeded.realm.ctx, { activeLabelIds: active });
+    const ref = rows[0]!.ref_id;
+    const rec = readClaimById(seeded.realm.ctx, ref, { activeLabelIds: active });
+    expect(rec?.ref_id).toBe(ref);
+    expect(rec?.statement).toBe(rows[0]!.statement);
+    expect(readClaimById(seeded.realm.ctx, 'clm_does_not_exist', { activeLabelIds: active })).toBeNull();
+  });
+
+  it('readClaimById fails closed when no scope is bound, even with a valid id', () => {
+    const ref = browseRealm(seeded.realm.ctx, { activeLabelIds: active })[0]!.ref_id;
+    expect(readClaimById(seeded.realm.ctx, ref, { activeLabelIds: [] })).toBeNull();
   });
 });

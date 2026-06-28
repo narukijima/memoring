@@ -4,7 +4,7 @@
 // byte of output; it is never bolted on later. Gates 3–7, 13.
 import fs from 'node:fs';
 import path from 'node:path';
-import { gate, activeScopeContainsAll, type GateItem, type GateRequest, bestClassificationState } from '@core/policy';
+import { gate, activeScopeContainsAll, type GateItem, type GateRequest } from '@core/policy';
 import { hmacHex } from '@security/crypto-primitives';
 import { renderMarkerBlock, signMarker } from '@security/ouroboros';
 import { newId } from '@core/schema/ids';
@@ -18,9 +18,10 @@ import { recordRecall } from '@claim/recall';
 import { isClaimSuppressed } from '@claim/seal';
 import { validateClaim } from '@claim/validator';
 import { resolveActiveLabelIds } from './active-scope';
+import { claimScope } from './claim-scope';
 import { proposeNeighbors } from './associate';
 import type { Aperture, Audience, ClassificationState } from '@core/schema/enums';
-import type { Claim, ContextPack, MemEvent } from '@core/schema/entities';
+import type { Claim, ContextPack } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
 import { atomicWriteFile, ensureDir } from '@storage/fs-safety';
 
@@ -77,21 +78,6 @@ export interface ScopedClaim {
    *  current guidance: 'superseded' (replaced via `claim expire`) or 'expired'
    *  (past valid_until at build time). */
   staleReason?: 'superseded' | 'expired';
-}
-
-/** Derive a claim's scope from the assignments of its evidence events. */
-export function claimScope(ctx: RealmContext, claim: Claim): { labelIds: string[]; scopeState: ClassificationState | null } {
-  const labelIds = new Set<string>();
-  const states: ClassificationState[] = [];
-  for (const eid of claim.evidence_event_identities) {
-    const e: MemEvent | undefined = ctx.store.findEventByIdentity(ctx.realmId, eid);
-    if (!e) continue;
-    for (const a of ctx.store.listAssignmentsForTarget('event', e.event_id)) {
-      a.label_ids.forEach((l) => labelIds.add(l));
-      states.push(a.classification_state);
-    }
-  }
-  return { labelIds: [...labelIds], scopeState: bestClassificationState(states) };
 }
 
 export function toScopedClaim(ctx: RealmContext, claim: Claim): ScopedClaim {

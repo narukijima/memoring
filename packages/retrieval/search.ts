@@ -8,9 +8,11 @@ import { normalizeLabel } from '@core/label-normalize';
 import { readClaimStatement } from '@claim/extractor';
 import { eventSealSignature, isClaimSuppressed, matchesActivePatternSeal } from '@claim/seal';
 import { activeScopeContainsAll, allowedScopeState, allowedSensitivityState, bestClassificationState } from '@core/policy';
+import { validateClaim } from '@claim/validator';
 import type { Claim, MemEvent } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
 import type { IndexHit } from '@storage/repositories';
+import { claimScope } from './claim-scope';
 
 function norm(s: string): string {
   return normalizeLabel(s);
@@ -57,8 +59,7 @@ export function indexClaim(ctx: RealmContext, claim: Claim): void {
   if (!statement) return;
   if (matchesActivePatternSeal(ctx, statement)) return; // pattern Seal (§4.15)
   if (isClaimSuppressed(ctx, claim, statement)) return; // event_identity / content Seal (§4.15)
-  const labelIds = claimLabelIds(ctx, claim);
-  const scopeState = claimScopeState(ctx, claim) ?? 'inferred';
+  const { labelIds, scopeState } = claimScope(ctx, claim);
   if (labelIds.length === 0) return;
   ctx.store.indexUpsert({
     ref_id: claim.claim_id,
@@ -66,38 +67,9 @@ export function indexClaim(ctx: RealmContext, claim: Claim): void {
     realm_id: ctx.realmId,
     label_ids: labelIds,
     sensitivity: claim.sensitivity,
-    scope_state: scopeState,
+    scope_state: scopeState ?? 'inferred',
     norm_text: norm(statement),
   });
-}
-
-function claimLabelIds(ctx: RealmContext, claim: Claim): string[] {
-  const ids = new Set<string>();
-  for (const eid of claim.evidence_event_identities) {
-    const e = ctx.store.findEventByIdentity(ctx.realmId, eid);
-    if (!e) continue;
-    for (const a of ctx.store.listAssignmentsForTarget('event', e.event_id)) a.label_ids.forEach((l) => ids.add(l));
-  }
-  // Fallback for an evidence-less claim (a promoted import, ADR-0007): use the
-  // claim's OWN explicit_user scope Assignment. No-op for evidence-backed claims —
-  // they already resolve labels from their evidence above.
-  if (ids.size === 0) {
-    for (const a of ctx.store.listAssignmentsForTarget('claim', claim.claim_id)) a.label_ids.forEach((l) => ids.add(l));
-  }
-  return [...ids];
-}
-
-function claimScopeState(ctx: RealmContext, claim: Claim): ClassificationState | null {
-  const states: ClassificationState[] = [];
-  for (const eid of claim.evidence_event_identities) {
-    const e = ctx.store.findEventByIdentity(ctx.realmId, eid);
-    if (!e) continue;
-    for (const a of ctx.store.listAssignmentsForTarget('event', e.event_id)) states.push(a.classification_state);
-  }
-  if (states.length === 0) {
-    for (const a of ctx.store.listAssignmentsForTarget('claim', claim.claim_id)) states.push(a.classification_state);
-  }
-  return bestClassificationState(states);
 }
 
 export interface SearchResult {
@@ -168,6 +140,80 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
   return out;
 }
 
+/** A full memory record for the agent tools (browse / read): the ORIGINAL statement
+ *  text (not the normalized snippet), plus identity for follow-up reads. Every record
+ *  has already passed the canonical Gate — including the read-time provenance
+ *  re-validation (`has_required_provenance`) that the ContextPack and `/recent`
+ *  surfaces enforce — so the agent path can never surface anything they would hide. */
+export interface MemoryRecord {
+  ref_id: string;
+  ref_type: 'claim';
+  kind: string;
+  created_at: string;
+  statement: string;
+  sensitivity: string;
+}
+
+/** Apply searchRealm's per-claim Gate (secret/confidential exclusion, sensitivity &
+ *  scope-state for the audience, pattern/identity/content Seals, active-scope
+ *  containment) to ONE consolidated claim. Returns the gated record or null. This is
+ *  the single chokepoint both browseRealm and readClaimById go through, so an agent
+ *  tool can never surface anything searchRealm wouldn't. */
+function gatedClaimRecord(ctx: RealmContext, claim: Claim, activeLabelIds: string[], audience: Audience): MemoryRecord | null {
+  if (claim.realm_id !== ctx.realmId) return null; // realm guard (searchRealm gets this from its SQL filter)
+  if (claim.status !== 'consolidated') return null;
+  if (claim.sensitivity === 'secret' || claim.sensitivity === 'unknown' || claim.sensitivity === 'confidential') return null;
+  const statement = readClaimStatement(ctx, claim);
+  if (!statement) return null;
+  // Read-time provenance re-validation — the canonical Gate's has_required_provenance
+  // check (validator.ts), shared with the ContextPack / browse / /recent surfaces. A
+  // claim whose required user-origin / evidence has been governed away since indexing
+  // is dropped here, so the agent path stays as tight as those surfaces.
+  if (validateClaim(ctx, claim, statement).decision !== 'consolidated') return null;
+  if (matchesActivePatternSeal(ctx, statement)) return null;
+  if (isClaimSuppressed(ctx, claim, statement)) return null;
+  const scope = claimScope(ctx, claim);
+  if (!activeScopeContainsAll(scope.labelIds, activeLabelIds)) return null;
+  const sensState = claim.sensitivity_classification_state;
+  if (!sensState || !allowedSensitivityState(sensState, audience, 'standard')) return null;
+  const scopeState = scope.scopeState ?? 'inferred';
+  if (scopeState === 'conflicted' || !allowedScopeState(scopeState, audience, 'standard')) return null;
+  return { ref_id: claim.claim_id, ref_type: 'claim', kind: claim.kind, created_at: claim.created_at, statement, sensitivity: claim.sensitivity };
+}
+
+/** Browse ALL gated, in-scope memories (no keyword filter) — the primitive that lets
+ *  an LLM agent read the scope's memory and answer conversational questions that share
+ *  no literal tokens with the stored text. Fail-closed on empty scope. */
+export function browseRealm(
+  ctx: RealmContext,
+  opts: { activeLabelIds?: string[]; audience?: Audience; order?: 'recent' | 'oldest'; limit?: number } = {},
+): MemoryRecord[] {
+  const active = opts.activeLabelIds ?? [];
+  if (active.length === 0) return []; // fail closed: no Realm-wide browse
+  const audience = opts.audience ?? 'ai_tool';
+  const out: MemoryRecord[] = [];
+  for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')) {
+    const rec = gatedClaimRecord(ctx, claim, active, audience);
+    if (rec) out.push(rec);
+  }
+  out.sort((a, b) => (opts.order === 'oldest' ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
+  return out.slice(0, opts.limit ?? 50);
+}
+
+/** Read ONE memory's full statement by ref_id, re-verifying the Gate — so an agent
+ *  passing an arbitrary id can never read out-of-scope, secret, or sealed content. */
+export function readClaimById(
+  ctx: RealmContext,
+  refId: string,
+  opts: { activeLabelIds?: string[]; audience?: Audience } = {},
+): MemoryRecord | null {
+  const active = opts.activeLabelIds ?? [];
+  if (active.length === 0) return null;
+  const claim = ctx.store.getClaim(refId);
+  if (!claim) return null;
+  return gatedClaimRecord(ctx, claim, active, opts.audience ?? 'ai_tool');
+}
+
 /**
  * Natural-language `ask` / `chat` retrieval helper. It preserves the hard safety
  * contract of searchRealm (same Gate/scope filters, no model call before retrieval)
@@ -178,13 +224,10 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
 export function searchRealmForQuestion(ctx: RealmContext, query: string, opts: SearchOptions = {}): QuestionSearchResult {
   const limit = opts.limit ?? 20;
   const queries = queryCandidates(query);
-  const first = searchRealm(ctx, queries[0] ?? query, { ...opts, limit });
-  if (first.length > 0 || queries.length <= 1) return { results: first, queries: queries.slice(0, 1) };
-
   const seen = new Set<string>();
   const merged: SearchResult[] = [];
-  const used = [queries[0]!];
-  for (const candidate of queries.slice(1)) {
+  const used: string[] = [];
+  for (const candidate of queries) {
     used.push(candidate);
     for (const result of searchRealm(ctx, candidate, { ...opts, limit })) {
       if (seen.has(result.ref_id)) continue;
@@ -192,9 +235,8 @@ export function searchRealmForQuestion(ctx: RealmContext, query: string, opts: S
       merged.push(result);
       if (merged.length >= limit) return { results: merged, queries: used };
     }
-    if (merged.length > 0) return { results: merged, queries: used };
   }
-  return { results: [], queries: used };
+  return { results: merged, queries: used };
 }
 
 export function queryCandidates(query: string): string[] {

@@ -8,29 +8,91 @@
 // as evidence (§5c). One invocation binds to exactly one Realm (§3).
 import { isActiveRealmSilence, openResolvedRealm, type RealmContext } from '@core/runtime';
 import { resolveActiveProjects } from '@core/realm';
-import type { Audience } from '@core/schema/enums';
 import { searchRealmForQuestion, type SearchResult } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
 import { printActiveRealmSilence } from './resolve';
 import { resolveOutputProvider, type OutputProvider } from '../output-provider';
-import { GROUNDING_INSTRUCTION, renderExcerpts, renderRendererMarker } from '../output-render';
+import { GROUNDING_INSTRUCTION, renderExcerpts, renderRendererMarker, stripRendererMarker } from '../output-render';
+import { searchAudienceFor } from '../egress';
 
 // Identifies the renderer in the Ouroboros marker (the ask path has no token-budget
 // Recipe, unlike the ContextPack).
 const ASK_RENDERER_RECIPE = 'ask.v1';
-
-function providerSearchAudience(provider: OutputProvider): Audience {
-  return provider.egress === 'remote' ? 'remote_ai_processing' : 'ai_tool';
-}
 
 /** Build the one-shot grounding prompt from the gated excerpts (one query, v1 §2). */
 export function buildAskPrompt(query: string, results: SearchResult[]): string {
   return `${GROUNDING_INSTRUCTION}\n\nMemory excerpts:\n${renderExcerpts(results)}\n\nQuestion: ${query}`;
 }
 
-export type AskOutcome = { grounded: false } | { grounded: true; answer: string };
+export type AskOutcome = { grounded: false } | { grounded: true; answer: string; citations: string[] };
+
+function shellArg(value: string): string {
+  return JSON.stringify(value);
+}
+
+function looksLikePlaceholder(query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return q === 'question' || q === 'your question' || q === '\u805e\u304d\u305f\u3044\u3053\u3068';
+}
+
+function labelNames(ctx: RealmContext, labelIds: string[]): string[] {
+  return labelIds.map((id) => ctx.store.getLabel(id)?.canonical_name).filter((name): name is string => Boolean(name));
+}
+
+function availableScopeNames(ctx: RealmContext): string[] {
+  return ctx.store
+    .listLabels(ctx.realmId)
+    .filter((l) => l.state === 'active')
+    .map((l) => l.canonical_name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function suggestedScope(
+  scopes: string[],
+  searched: string[],
+  explicitScope: string | undefined,
+  preferMemoring: boolean,
+): string | undefined {
+  if (explicitScope && scopes.includes(explicitScope)) return explicitScope;
+  if (preferMemoring && scopes.includes('Memoring')) return 'Memoring';
+  if (searched.length > 0) return searched[0];
+  return scopes.includes('Memoring') ? 'Memoring' : scopes[0];
+}
+
+export function printNoGroundedAnswer(
+  ctx: RealmContext,
+  query: string,
+  activeLabelIds: string[],
+  explicitScope: string | undefined,
+): void {
+  const searched = labelNames(ctx, activeLabelIds);
+  console.log('  No grounded answer in the searched memory. Not answering from outside knowledge.');
+  if (looksLikePlaceholder(query)) {
+    console.log('  The text you typed looks like a placeholder. Replace it with the actual thing you want to recall.');
+  }
+  if (explicitScope && activeLabelIds.length === 0) {
+    console.log(`  Scope not found or not active: ${explicitScope}`);
+  } else {
+    console.log(`  Searched scope: ${searched.length > 0 ? searched.join(', ') : '(none)'}`);
+  }
+  const scopes = availableScopeNames(ctx);
+  if (scopes.length > 0) {
+    const shown = scopes.slice(0, 8);
+    const more = scopes.length > shown.length ? `, +${scopes.length - shown.length} more` : '';
+    console.log(`  Available scopes: ${shown.join(', ')}${more}`);
+    const placeholder = looksLikePlaceholder(query);
+    const nextQuery = placeholder ? 'what did we decide about Memoring?' : query;
+    const nextScope = suggestedScope(scopes, searched, explicitScope, placeholder);
+    if (nextScope && (placeholder || !searched.includes(nextScope))) {
+      console.log(`  Try: memoring ask ${shellArg(nextQuery)} --scope ${shellArg(nextScope)}`);
+    } else {
+      console.log('  Try a more specific memory question, or choose a different scope from the list above.');
+    }
+  }
+  console.log('  Run `memoring status` to see the current memory setup.');
+}
 
 /**
  * Core renderer: gated retrieval → strict grounding → marked prose. Pure over an
@@ -48,18 +110,22 @@ export async function askRealm(
 ): Promise<AskOutcome> {
   const { results } = searchRealmForQuestion(ctx, query, {
     activeLabelIds: opts.activeLabelIds,
-    audience: providerSearchAudience(provider),
+    audience: searchAudienceFor(provider.egress),
   });
   if (results.length === 0) return { grounded: false };
   const raw = await provider.generate(buildAskPrompt(query, results));
-  return { grounded: true, answer: `${raw.trim()}\n\n${renderRendererMarker(ctx, ASK_RENDERER_RECIPE, now)}` };
+  return {
+    grounded: true,
+    answer: `${raw.trim()}\n\n${renderRendererMarker(ctx, ASK_RENDERER_RECIPE, now)}`,
+    citations: results.map((r) => r.ref_id),
+  };
 }
 
 export async function cmdAsk(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const query = flags._.join(' ').trim();
   if (!query) {
-    console.error('Usage: memoring ask <question> [--scope <label>] [--project <id>]');
+    console.error('Usage: memoring ask <question> [--scope <label>] [--project <id>] [--show-marker]');
     return 1;
   }
   const opened = await openResolvedRealm(flags, getPassphrase);
@@ -86,12 +152,10 @@ export async function cmdAsk(argv: string[]): Promise<number> {
     const activeLabelIds = resolveActiveLabelIds(ctx, res.projectIds, flags.scope as string | undefined);
     const outcome = await askRealm(ctx, provider, query, { activeLabelIds });
     if (!outcome.grounded) {
-      console.log(
-        '  No grounded answer for this scope. Nothing in the gated memory matches; not answering from outside knowledge.',
-      );
+      printNoGroundedAnswer(ctx, query, activeLabelIds, flags.scope as string | undefined);
       return 0;
     }
-    console.log(outcome.answer);
+    console.log(flags['show-marker'] === true ? outcome.answer : stripRendererMarker(outcome.answer));
     return 0;
   } finally {
     ctx.close(false);

@@ -12,6 +12,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
   scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
+  bin?: Record<string, string>;
 };
 
 // npm runs these on the consumer's machine during `npm install`. Memoring ships none,
@@ -71,6 +72,11 @@ describe('distribution ethos guards (ADR-0009)', () => {
     for (const hook of INSTALL_LIFECYCLE) {
       expect(scripts[hook], `package.json must not define a "${hook}" script`).toBeUndefined();
     }
+  });
+
+  it('exposes both lowercase and product-name CLI entrypoints', () => {
+    expect(pkg.bin?.memoring).toBe('bin/memoring.mjs');
+    expect(pkg.bin?.Memoring).toBe('bin/memoring.mjs');
   });
 
   it('pulls in no telemetry/analytics production dependency', () => {

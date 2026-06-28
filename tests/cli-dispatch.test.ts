@@ -43,6 +43,13 @@ describe('CLI dispatch wiring (subprocess)', () => {
     expect(code).toBe(0);
   }, 30000);
 
+  it('a leading flag opens chat, not "Unknown command" (e.g. `memoring --scope X`)', () => {
+    const { out, code } = runCli(['--scope', 'Memoring']);
+    expect(out).not.toContain('Unknown command'); // the bug: --scope was read as a subcommand
+    expect(out).toContain('Active Realm unresolved'); // reached cmdChat → realm resolution
+    expect(code).toBe(0);
+  }, 30000);
+
   it('`ask` is dispatched (not "Unknown command")', () => {
     const { out } = runCli(['ask', 'anything']);
     expect(out).not.toContain('Unknown command');
@@ -53,6 +60,31 @@ describe('CLI dispatch wiring (subprocess)', () => {
     const { out } = runCli(['config', 'show']);
     expect(out).not.toContain('Unknown command');
     expect(out).toContain('Active Realm unresolved'); // reached cmdConfig → realm resolution
+  }, 30000);
+
+  it('no args shows the short human entrypoint, not the full operator manual', () => {
+    const { out, code } = runCli([]);
+    expect(code).toBe(0);
+    expect(out).toContain('Start:');
+    expect(out).toContain('Memoring');
+    expect(out).toContain('Ask memory:');
+    expect(out).toContain('memoring status');
+    expect(out).not.toContain('MEMORING_LLM_REMOTE_OPT_IN');
+  }, 30000);
+
+  it('`status` is dispatched as a concise setup check', () => {
+    const { out, code } = runCli(['status']);
+    expect(code).toBe(0);
+    expect(out).toContain('Memoring');
+    expect(out).toContain('Memory: not ready');
+    expect(out).not.toContain('Unknown command');
+  }, 30000);
+
+  it('free-text input is treated as a question instead of an unknown command', () => {
+    const { out, code } = runCli(['what', 'did', 'we', 'decide']);
+    expect(code).toBe(0);
+    expect(out).not.toContain('Unknown command');
+    expect(out).toContain('Active Realm unresolved'); // reached cmdAsk
   }, 30000);
 
   it('an unknown command DOES report "Unknown command" (the guard is meaningful)', () => {

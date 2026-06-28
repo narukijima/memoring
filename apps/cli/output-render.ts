@@ -45,3 +45,8 @@ export function renderRendererMarker(ctx: RealmContext, recipeId: string, now: D
   });
   return renderMarkerBlock(marker);
 }
+
+export function stripRendererMarker(text: string): string {
+  const markerStart = text.indexOf('\n\n```memoring-ouroboros');
+  return markerStart >= 0 ? text.slice(0, markerStart).trimEnd() : text;
+}

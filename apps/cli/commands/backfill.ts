@@ -11,7 +11,7 @@ import { resolveProvider } from '../provider';
 import { isDryRun, printLoopStats, sampleLineCount } from './connect';
 import { printActiveRealmSilence } from './resolve';
 
-export async function cmdBackfill(argv: string[]): Promise<number> {
+export async function cmdBackfill(argv: string[], opts: { friendly?: boolean } = {}): Promise<number> {
   const flags = parseFlags(argv); // --since reserved; --dry-run previews without ingesting
   const opened = await openResolvedRealm(flags, getPassphrase);
   if (isActiveRealmSilence(opened)) return printActiveRealmSilence(opened);
@@ -28,7 +28,7 @@ export async function cmdBackfill(argv: string[]): Promise<number> {
       return 0;
     }
     const stats = await runLoop(ctx, { method: 'backfill', provider: resolveProvider(ctx.config.llm) });
-    printLoopStats(stats);
+    printLoopStats(stats, opts);
     return 0;
   } finally {
     ctx.close(true);

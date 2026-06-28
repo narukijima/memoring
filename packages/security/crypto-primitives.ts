@@ -1,15 +1,7 @@
 // Thin, dependency-free wrappers over node:crypto. All at-rest confidentiality
 // and all identity/fingerprint HMACs flow through here so the crypto choices
 // stay in one auditable place.
-import {
-  createHmac,
-  hkdfSync,
-  randomBytes,
-  scryptSync,
-  timingSafeEqual,
-  createCipheriv,
-  createDecipheriv,
-} from 'node:crypto';
+import { createHmac, hkdfSync, randomBytes, scryptSync, createCipheriv, createDecipheriv } from 'node:crypto';
 
 export const AEAD_ALGO = 'aes-256-gcm';
 const IV_BYTES = 12;
@@ -89,11 +81,4 @@ export function hmacHex(key: Buffer, data: string | Buffer): string {
 
 export function randomSecret(bytes = KEY_BYTES): Buffer {
   return randomBytes(bytes);
-}
-
-export function constantTimeEqualHex(a: string, b: string): boolean {
-  const ba = Buffer.from(a, 'hex');
-  const bb = Buffer.from(b, 'hex');
-  if (ba.length !== bb.length) return false;
-  return timingSafeEqual(ba, bb);
 }

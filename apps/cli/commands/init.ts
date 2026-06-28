@@ -139,6 +139,8 @@ export async function cmdInit(argv: string[]): Promise<number> {
     console.log('');
     console.log(`      ${recoveryCode}`);
     console.log('');
+    console.log('  If you forget your passphrase, reset it with this code:');
+    console.log('      memoring rekey --recovery');
     console.log('  If you lose BOTH your passphrase and this recovery code, the Realm');
     console.log('  cannot be decrypted. Memoring has no server-side recovery.');
     console.log('');

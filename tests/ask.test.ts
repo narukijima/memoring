@@ -331,7 +331,7 @@ describe('cmdAsk end-to-end (dispatch → scope gate → render)', () => {
     expect(logs.join('\n')).not.toContain('memoring:ouroboros'); // nothing rendered
   });
 
-  it('grounded question → prints a marked answer via a stubbed LOCAL model (no network)', async () => {
+  it('grounded question → prints a plain answer by default via a stubbed LOCAL model (no network)', async () => {
     const base = basePath();
     const projectRoot = path.join(tmp, 'proj');
     fs.mkdirSync(projectRoot, { recursive: true });
@@ -351,7 +351,30 @@ describe('cmdAsk end-to-end (dispatch → scope gate → render)', () => {
     expect(await cmdAsk(['better-sqlite3'])).toBe(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(logs.join('\n')).toContain('You use better-sqlite3.');
-    expect(textLooksContextInjected(logs.join('\n'))).toBe(true); // Ouroboros marker printed
+    expect(textLooksContextInjected(logs.join('\n'))).toBe(false); // human CLI default hides the marker
+  });
+
+  it('grounded question with --show-marker prints the Ouroboros marker', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ choices: [{ message: { content: 'You use better-sqlite3.' } }] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+    process.chdir(projectRoot);
+
+    expect(await cmdAsk(['better-sqlite3', '--show-marker'])).toBe(0);
+    expect(textLooksContextInjected(logs.join('\n'))).toBe(true);
   });
 
   it('grounded scope but no matching memory → "No grounded answer", model NOT called', async () => {
@@ -369,4 +392,5 @@ describe('cmdAsk end-to-end (dispatch → scope gate → render)', () => {
     expect(fetchMock).not.toHaveBeenCalled(); // 0 results → no LLM call
     expect(logs.join('\n')).toContain('No grounded answer');
   });
+
 });

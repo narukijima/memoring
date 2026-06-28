@@ -3,12 +3,25 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { buildChatPrompt, chatTurn, cmdChat, type ChatTurn } from '../apps/cli/commands/chat';
+import {
+  bannerLines,
+  CHAT_COMMANDS,
+  cmdChat,
+  helpLines,
+  lastMemoryDetailLines,
+  memoryInventoryLines,
+  memoryList,
+  parseChatInput,
+  recentMemoryLines,
+  scopeListLines,
+  switchScopeLines,
+  type DisplayedMemoryRow,
+} from '../apps/cli/commands/chat';
 import type { OutputProvider } from '../apps/cli/output-provider';
-import { searchRealm, type SearchResult } from '@retrieval/search';
 import { resolveActiveLabelIds } from '@retrieval/active-scope';
 import { textLooksContextInjected } from '@security/ouroboros';
 import { basePath } from '@core/paths';
+import { openRealmLocal } from '@core/runtime';
 import { createReplicaAtRoot } from '../apps/cli/commands/init';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
 import { createIndexedReplica, putIndexedClaimWithStates } from './helpers';
@@ -38,7 +51,7 @@ function lineStream(s: string): Readable {
   return r;
 }
 
-describe('chat per-turn core — grounding, Silence, Ouroboros, continuity (ADR-0011 §2/§4/§5)', () => {
+describe('chat local helpers — listing, scopes, last-memory detail (deterministic, gated)', () => {
   let seeded: SeededRealm;
   let active: string[];
   beforeEach(async () => {
@@ -47,118 +60,104 @@ describe('chat per-turn core — grounding, Silence, Ouroboros, continuity (ADR-
   });
   afterEach(() => seeded.restore());
 
-  it('buildChatPrompt embeds grounding + every excerpt; with history adds the continuity block', () => {
-    const results: SearchResult[] = [
-      { ref_id: 'clm_1', ref_type: 'claim', snippet: 'uses better-sqlite3', sensitivity: 'internal' },
-    ];
-    const first = buildChatPrompt([], 'which database?', results);
-    expect(first).toContain('ONLY facts found in the excerpts'); // strict grounding
-    expect(first).toContain('uses better-sqlite3'); // the gated excerpt is forwarded
-    expect(first).toContain('which database?');
-    expect(first).not.toContain('Conversation so far'); // no history yet
-
-    const history: ChatTurn[] = [{ question: 'which database?', answer: 'It uses better-sqlite3.' }];
-    const second = buildChatPrompt(history, 'and the indentation?', results);
-    expect(second).toContain('Conversation so far'); // prior turns supplied for continuity
-    expect(second).toContain('which database?'); // prior question
-    expect(second).toContain('It uses better-sqlite3.'); // prior answer (clean prose)
-    expect(second).toContain('continuity only'); // still answer from excerpts only
-    expect(second).toContain('and the indentation?'); // this turn's question
-  });
-
-  it('0 retrieval results → grounded:false and the model is NEVER called (Silence)', async () => {
-    const mock = new MockOutputProvider();
-    const out = await chatTurn(seeded.realm.ctx, mock, [], 'zzzz-nothing-matches-this', { activeLabelIds: active });
-    expect(out.grounded).toBe(false);
-    expect(mock.calls).toBe(0); // no LLM call, no fabrication
-  });
-
-  it('fail-closed scope: an empty active scope yields no results and never calls the model', async () => {
-    const mock = new MockOutputProvider();
-    const out = await chatTurn(seeded.realm.ctx, mock, [], 'better-sqlite3', { activeLabelIds: [] });
-    expect(out.grounded).toBe(false);
-    expect(mock.calls).toBe(0);
-  });
-
-  it('with results → generate gets the gated snippets; answer carries the marker, reply stays clean', async () => {
-    const mock = new MockOutputProvider('local', 'The project uses better-sqlite3.');
-    const hits = searchRealm(seeded.realm.ctx, 'better-sqlite3', { activeLabelIds: active });
-    expect(hits.length).toBeGreaterThan(0);
-
-    const out = await chatTurn(seeded.realm.ctx, mock, [], 'better-sqlite3', { activeLabelIds: active });
-    expect(out.grounded).toBe(true);
-    expect(mock.calls).toBe(1);
-    expect(mock.prompts[0]!).toContain('ONLY facts found in the excerpts'); // grounding instruction present
-    expect(mock.prompts[0]!).toContain(hits[0]!.snippet); // the actual gated excerpt is forwarded
-
-    if (out.grounded) {
-      expect(out.answer).toContain('The project uses better-sqlite3.'); // the synthesized answer
-      expect(textLooksContextInjected(out.answer)).toBe(true); // Ouroboros marker attached
-      expect(textLooksContextInjected(out.reply)).toBe(false); // reply (history) stays marker-free
-    }
-  });
-
-  it('natural prose with an embedded concrete term grounds in chat too', async () => {
-    const mock = new MockOutputProvider('local', 'The project uses better-sqlite3.');
-    const out = await chatTurn(seeded.realm.ctx, mock, [], 'better-sqlite3について何が分かっている？', {
-      activeLabelIds: active,
+  it('recentMemoryLines lists gated consolidated claims by recency', () => {
+    const claim = putIndexedClaimWithStates(seeded.realm.ctx, 'newest visible memory token', active, ['proj_test'], {
+      scopeState: 'inferred',
     });
-    expect(out.grounded).toBe(true);
-    expect(mock.calls).toBe(1);
-    expect(mock.prompts[0]!).toContain('better-sqlite3');
+    seeded.realm.ctx.store.putClaim({ ...claim, confidence: 1, created_by: 'user' });
+    const lines = recentMemoryLines(seeded.realm.ctx, active, 10, 'ja').join('\n');
+    expect(lines).toContain('最近の記憶');
+    expect(lines).toContain('newest visible memory token');
   });
 
-  it('remote output retrieval uses the remote_ai_processing audience and withholds candidate scope', async () => {
-    const statement = 'candidate scoped output only chat token';
-    putIndexedClaimWithStates(seeded.realm.ctx, statement, active, ['proj_test']);
-
-    const local = new MockOutputProvider('local', 'Local answer.');
-    const localOut = await chatTurn(seeded.realm.ctx, local, [], statement, { activeLabelIds: active });
-    expect(localOut.grounded).toBe(true);
-    expect(local.calls).toBe(1);
-    expect(local.prompts[0]!).toContain(statement);
-
-    const remote = new MockOutputProvider('remote', 'Remote answer.');
-    const remoteOut = await chatTurn(seeded.realm.ctx, remote, [], statement, { activeLabelIds: active });
-    expect(remoteOut.grounded).toBe(false);
-    expect(remote.calls).toBe(0);
+  it('memoryList can list oldest memories with the same gated row model', () => {
+    const out = memoryList(seeded.realm.ctx, active, { order: 'oldest', limit: 1, lang: 'ja' });
+    expect(out.lines.join('\n')).toContain('一番古い記憶');
+    expect(out.rows.length).toBe(1);
   });
 
-  it('multi-turn: prior turns thread into the next prompt, but each turn retrieves on its own', async () => {
-    const mock = new MockOutputProvider('local', 'It uses better-sqlite3.');
-    const history: ChatTurn[] = [];
-
-    const t1 = await chatTurn(seeded.realm.ctx, mock, history, 'better-sqlite3', { activeLabelIds: active });
-    expect(t1.grounded).toBe(true);
-    if (t1.grounded) history.push({ question: 'better-sqlite3', answer: t1.reply });
-
-    const t2 = await chatTurn(seeded.realm.ctx, mock, history, 'better-sqlite3', { activeLabelIds: active });
-    expect(t2.grounded).toBe(true);
-    expect(mock.calls).toBe(2); // each turn performs its OWN gated retrieval + call
-    // The second prompt carries the first exchange for continuity.
-    expect(mock.prompts[1]!).toContain('Conversation so far');
-    expect(mock.prompts[1]!).toContain('It uses better-sqlite3.');
+  it('memoryList renders in the requested surface language', () => {
+    const ja = memoryList(seeded.realm.ctx, active, { order: 'recent', lang: 'ja' }).lines.join('\n');
+    const en = memoryList(seeded.realm.ctx, active, { order: 'recent', lang: 'en' }).lines.join('\n');
+    expect(ja).toContain('最近の記憶');
+    expect(en).toContain('Recent memories');
+    expect(en).not.toContain('最近の記憶');
   });
 
-  it('READ-ONLY: turns create no Events / Claims / candidates', async () => {
-    const ctx = seeded.realm.ctx;
-    const before = {
-      events: ctx.store.listEvents(ctx.realmId).length,
-      claims: ctx.store.listClaims(ctx.realmId).length,
-      candidates: ctx.store.listClaimsByStatus(ctx.realmId, 'candidate').length,
+  it('memoryInventoryLines separates current scope count from realm-wide count', () => {
+    const lines = memoryInventoryLines(seeded.realm.ctx, active, 'ja').join('\n');
+    expect(lines).toContain('今のスコープ');
+    expect(lines).toContain('Realm全体の記憶');
+  });
+
+  it('scopeListLines shows the active scope and available scopes without memory content', () => {
+    const lines = scopeListLines(seeded.realm.ctx, active, 'ja').join('\n');
+    expect(lines).toContain('現在のスコープ');
+    expect(lines).toContain('利用可能なスコープ');
+    expect(lines).not.toContain('better-sqlite3');
+  });
+
+  it('switchScopeLines changes the active scope by label name', () => {
+    const scopeName = seeded.realm.ctx.store.getLabel(active[0]!)!.canonical_name;
+    const switched = switchScopeLines(seeded.realm.ctx, scopeName, 'ja');
+    expect(switched.activeLabelIds).toEqual(active);
+    expect(switched.lines.join('\n')).toContain('スコープを切り替えました');
+  });
+
+  it('lastMemoryDetailLines answers from the displayed row, not a new search', async () => {
+    const row: DisplayedMemoryRow = {
+      createdAt: '2026-06-25T00:00:00.000Z',
+      kind: 'constraint',
+      statement: 'Use Claude Code to upload your components.',
     };
-    const mock = new MockOutputProvider('local', 'It uses better-sqlite3.');
-    const history: ChatTurn[] = [];
-    for (let i = 0; i < 3; i++) {
-      const out = await chatTurn(ctx, mock, history, 'better-sqlite3', { activeLabelIds: active });
-      if (out.grounded) history.push({ question: 'better-sqlite3', answer: out.reply });
-    }
-    // Also exercise an unanswerable turn (no write either).
-    await chatTurn(ctx, mock, history, 'zzzz-nothing-matches', { activeLabelIds: active });
+    await expect(lastMemoryDetailLines(new MockOutputProvider(), row, 'raw', '原文は？', 'ja')).resolves.toEqual([
+      '記憶の原文:',
+      'Use Claude Code to upload your components.',
+    ]);
+  });
 
-    expect(ctx.store.listEvents(ctx.realmId).length).toBe(before.events);
-    expect(ctx.store.listClaims(ctx.realmId).length).toBe(before.claims);
-    expect(ctx.store.listClaimsByStatus(ctx.realmId, 'candidate').length).toBe(before.candidates);
+  it('lastMemoryDetailLines degrades to the raw text when no model is available', async () => {
+    const row: DisplayedMemoryRow = { createdAt: '2026-06-25T00:00:00.000Z', kind: 'constraint', statement: 'raw body only' };
+    const lines = await lastMemoryDetailLines(null, row, 'translate', '日本語にして', 'ja');
+    expect(lines.join('\n')).toContain('モデルが必要');
+    expect(lines.join('\n')).toContain('raw body only');
+  });
+});
+
+describe('slash-command parsing (deterministic, no model)', () => {
+  it('classifies prose, slash commands, exit, and empty input', () => {
+    expect(parseChatInput('what did we decide?')).toEqual({ kind: 'prose', text: 'what did we decide?' });
+    expect(parseChatInput('   ')).toEqual({ kind: 'empty' });
+    expect(parseChatInput(':exit')).toEqual({ kind: 'exit' });
+    expect(parseChatInput(':quit')).toEqual({ kind: 'exit' });
+    expect(parseChatInput('/status')).toEqual({ kind: 'command', name: 'status', arg: '' });
+    expect(parseChatInput('/STATUS')).toEqual({ kind: 'command', name: 'status', arg: '' }); // name is case-insensitive
+    expect(parseChatInput('/scope Memoring')).toEqual({ kind: 'command', name: 'scope', arg: 'Memoring' });
+    expect(parseChatInput('/scope  My Project ')).toEqual({ kind: 'command', name: 'scope', arg: 'My Project' });
+    expect(parseChatInput('/')).toEqual({ kind: 'command', name: '', arg: '' }); // bare slash → help
+  });
+
+  it('helpLines lists every command from the single CHAT_COMMANDS source of truth', () => {
+    const help = helpLines('en').join('\n');
+    for (const cmd of CHAT_COMMANDS) expect(help).toContain(`/${cmd.name}`);
+    expect(help).toContain('/scope <name>'); // command with an argument hint
+    expect(help).toContain('natural-language question'); // prose path is advertised
+  });
+
+  it('helpLines and bannerLines follow the surface language', () => {
+    expect(helpLines('ja').join('\n')).toContain('コマンド:');
+    expect(helpLines('en').join('\n')).toContain('Commands:');
+    expect(bannerLines('default', 'proj_x', 'm', 'ja').join('\n')).toContain('ローカル記憶');
+    expect(bannerLines('default', 'proj_x', 'm', 'en').join('\n')).toContain('local memory');
+  });
+
+  it('bannerLines surfaces realm, scope, and model and points at /help and /exit', () => {
+    const banner = bannerLines('default', 'proj_x', 'qwen2.5:3b (local)', 'en').join('\n');
+    expect(banner).toContain('default');
+    expect(banner).toContain('proj_x');
+    expect(banner).toContain('qwen2.5:3b (local)');
+    expect(banner).toContain('/help');
+    expect(banner).toContain('/exit');
   });
 });
 
@@ -182,6 +181,7 @@ describe('cmdChat end-to-end (dispatch → scope gate → REPL)', () => {
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memoring-chat-'));
     process.env.MEMORING_HOME = path.join(tmp, 'home');
+    process.env.MEMORING_LANG = 'ja'; // pin the surface language so output assertions are deterministic
     delete process.env.MEMORING_PASSPHRASE;
     for (const k of LLM_KEYS) delete process.env[k];
     logs = [];
@@ -201,87 +201,342 @@ describe('cmdChat end-to-end (dispatch → scope gate → REPL)', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('ambiguous scope → Silence, returning BEFORE provider resolution (no LLM path)', async () => {
+  it('no resolvable scope → REPL opens with a no-scope notice (not an exit); local ops still work', async () => {
     const base = basePath();
     createReplicaAtRoot({ root: base, name: 'default', usePassphrase: false }); // no projects → CWD is ambiguous
-    // A remote model with NO opt-in is configured: if cmdChat reached provider
-    // resolution it would warn + exit 1. It must not — the scope gate Silences first.
-    process.env.MEMORING_LLM_BASE_URL = 'https://api.deepseek.com/v1';
-    process.env.MEMORING_LLM_MODEL = 'deepseek-chat';
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
     const outside = path.join(tmp, 'outside');
     fs.mkdirSync(outside, { recursive: true });
     process.chdir(outside);
 
-    expect(await cmdChat([], lineStream('better-sqlite3\n:exit\n'))).toBe(0);
-    expect(errors.join('\n')).toContain('Silence');
-    expect(errors.join('\n')).not.toContain('MEMORING_LLM_REMOTE_OPT_IN'); // provider never resolved
+    // /scopes needs no model; the REPL must be usable with no scope bound, and a
+    // memory listing must refuse (fail-closed) rather than do a Realm-wide read.
+    expect(await cmdChat([], lineStream('/recent\n/scopes\n:exit\n'))).toBe(0);
+    expect(errors.join('\n')).toContain('スコープが未選択'); // no-scope notice (MEMORING_LANG=ja)
+    expect(logs.join('\n')).toContain('先にスコープを選んでください'); // /recent fails closed, asks to pick
+    expect(fetchMock).not.toHaveBeenCalled(); // no model touched
     expect(logs.join('\n')).not.toContain('memoring:ouroboros'); // nothing rendered
   });
 
-  it('grounded turn → prints a marked answer via a stubbed LOCAL model, then ":exit" ends', async () => {
+  it('grounded prose → prints a plain answer by default via a stubbed LOCAL model, then ":exit" ends', async () => {
     const base = basePath();
     const projectRoot = path.join(tmp, 'proj');
     fs.mkdirSync(projectRoot, { recursive: true });
     createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
     process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1'; // loopback → local, no opt-in
     process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ choices: [{ message: { content: 'You use better-sqlite3.' } }] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    );
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      const content = call++ === 0 ? '{"tool":"browse_memories","args":{}}' : '{"answer":"You use better-sqlite3."}';
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
     vi.stubGlobal('fetch', fetchMock);
     process.chdir(projectRoot);
 
     expect(await cmdChat([], lineStream('better-sqlite3\n:exit\n'))).toBe(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // tool observation + grounded answer
     expect(logs.join('\n')).toContain('You use better-sqlite3.');
-    expect(textLooksContextInjected(logs.join('\n'))).toBe(true); // Ouroboros marker printed
+    expect(textLooksContextInjected(logs.join('\n'))).toBe(false); // human CLI default hides the marker
   });
 
-  it('an unanswerable turn prints "No grounded answer" and the session continues to the next turn', async () => {
+  it('grounded prose with --show-marker prints the Ouroboros marker', async () => {
     const base = basePath();
     const projectRoot = path.join(tmp, 'proj');
     fs.mkdirSync(projectRoot, { recursive: true });
     createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
     process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
     process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ choices: [{ message: { content: 'You use better-sqlite3.' } }] }), {
+    let call = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const content = call++ === 0 ? '{"tool":"browse_memories","args":{}}' : '{"answer":"You use better-sqlite3."}';
+        return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
-        }),
+        });
+      }),
     );
-    vi.stubGlobal('fetch', fetchMock);
     process.chdir(projectRoot);
 
-    // First turn matches nothing (Silence, no call); second turn is grounded (one call).
-    expect(await cmdChat([], lineStream('zzzz-nothing-matches\nbetter-sqlite3\n:exit\n'))).toBe(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1); // only the grounded turn called the model
-    expect(logs.join('\n')).toContain('No grounded answer'); // the unanswerable turn
-    expect(logs.join('\n')).toContain('You use better-sqlite3.'); // the grounded turn after it
+    expect(await cmdChat(['--show-marker'], lineStream('better-sqlite3\n:exit\n'))).toBe(0);
+    expect(textLooksContextInjected(logs.join('\n'))).toBe(true);
   });
 
-  it('resolved scope but a remote model without opt-in → exit 1, REPL never starts, model not called', async () => {
+  it('/marker on turns the marker back on mid-session', async () => {
     const base = basePath();
     const projectRoot = path.join(tmp, 'proj');
     fs.mkdirSync(projectRoot, { recursive: true });
     createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
-    // Scope RESOLVES (we are inside the project), so the run reaches provider
-    // resolution — which refuses the remote model for lack of opt-in (null) and
-    // exits 1 BEFORE reading any turn.
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    let call = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const content = call++ === 0 ? '{"tool":"browse_memories","args":{}}' : '{"answer":"You use better-sqlite3."}';
+        return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
+    );
+    process.chdir(projectRoot);
+
+    expect(await cmdChat([], lineStream('/marker on\nbetter-sqlite3\n:exit\n'))).toBe(0);
+    expect(logs.join('\n')).toContain('マーカー: 表示'); // localized (MEMORING_LANG=ja)
+    expect(textLooksContextInjected(logs.join('\n'))).toBe(true); // marker shown after /marker on
+  });
+
+  it('the agent answers each prose turn only after a gated tool observation', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      const content = call++ % 2 === 0 ? '{"tool":"browse_memories","args":{}}' : '{"answer":"You use better-sqlite3."}';
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    // Two prose turns; each turn must first observe gated memory, then answer.
+    expect(await cmdChat([], lineStream('first question\nsecond question\n:exit\n'))).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(4); // browse+answer per prose turn
+    expect(logs.join('\n')).toContain('You use better-sqlite3.');
+    expect(logs.join('\n')).not.toContain('No grounded answer'); // the canned path is gone
+  });
+
+  it('a model error on one turn is caught; the REPL survives and later turns still work', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    // The model REJECTS on the prose turn (e.g. Ollama down / network blip). Without the
+    // per-turn error boundary this would unwind through the realm-closing finally and
+    // exit the whole session; with it, the turn is reported and the REPL keeps going.
+    const fetchMock = vi.fn(async () => {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:11434');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    // prose turn fails → /status (local) must still run afterward → clean exit.
+    expect(await cmdChat([], lineStream('better-sqlite3\n/status\n:exit\n'))).toBe(0);
+    expect(fetchMock).toHaveBeenCalled(); // the prose turn did try the model and threw
+    expect(logs.join('\n')).toContain('エラーが発生しました'); // turnError shown (ja), session continued
+    expect(logs.join('\n')).toContain('記憶: default'); // /status ran AFTER the failure → REPL survived
+  });
+
+  it('the agent can call a tool, then answer from the result (multi-step)', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      // Step 1: the model calls a tool. Step 2: it answers from the observation.
+      const content = call++ === 0 ? '{"tool":"browse_memories","args":{}}' : '{"answer":"The project uses better-sqlite3."}';
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    expect(await cmdChat([], lineStream('what database do we use?\n:exit\n'))).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // tool step + answer step
+    expect(logs.join('\n')).toContain('The project uses better-sqlite3.');
+  });
+
+  it('/status prints setup status locally without calling the model', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    expect(await cmdChat([], lineStream('/status\n:exit\n'))).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled(); // status is local state; no model resolution needed
+    expect(logs.join('\n')).toContain('記憶: default'); // in-chat /status follows the session language (ja)
+    expect(logs.join('\n')).toContain('保存済み:');
+    expect(logs.join('\n')).not.toContain('No grounded answer');
+  });
+
+  it('/help lists the slash commands without touching memory or the model', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    expect(await cmdChat([], lineStream('/help\n:exit\n'))).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(logs.join('\n')).toContain('/status');
+    expect(logs.join('\n')).toContain('/scope');
+    expect(logs.join('\n')).not.toContain('No grounded answer');
+  });
+
+  it('the surface language follows MEMORING_LANG end-to-end (en)', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    process.env.MEMORING_LANG = 'en'; // override the ja default for this test
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    expect(await cmdChat([], lineStream('/help\n/recent\n:exit\n'))).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(logs.join('\n')).toContain('Commands:'); // English help heading
+    expect(logs.join('\n')).toContain('No memories are visible'); // English empty-list line
+    expect(logs.join('\n')).not.toContain('最近の記憶'); // no Japanese leaking through
+  });
+
+  it('an unknown slash command is reported, not searched or sent to the model', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    expect(await cmdChat([], lineStream('/nope\n:exit\n'))).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(logs.join('\n')).toContain('不明なコマンド: /nope'); // localized (MEMORING_LANG=ja)
+    expect(logs.join('\n')).not.toContain('No grounded answer');
+  });
+
+  it('/recent prints the latest gated memories locally instead of a no-grounded miss', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'seed event');
+    const ctx = openRealmLocal(base);
+    try {
+      const claim = putIndexedClaimWithStates(ctx, 'recent memory from chat route', ['lbl_default'], ['proj_default'], {
+        scopeState: 'inferred',
+      });
+      ctx.store.putClaim({ ...claim, confidence: 1, created_by: 'user' });
+      ctx.flush();
+    } finally {
+      ctx.close(true);
+    }
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    expect(await cmdChat([], lineStream('/recent\n:exit\n'))).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(logs.join('\n')).toContain('最近の記憶');
+    expect(logs.join('\n')).toContain('recent memory from chat route');
+    expect(logs.join('\n')).not.toContain('No grounded answer');
+  });
+
+  it('/raw after /recent shows the last listed memory verbatim with no model call', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'seed event');
+    const ctx = openRealmLocal(base);
+    try {
+      const claim = putIndexedClaimWithStates(ctx, 'follow-up memory raw text', ['lbl_default'], ['proj_default'], {
+        scopeState: 'inferred',
+      });
+      ctx.store.putClaim({ ...claim, confidence: 1, created_by: 'user' });
+      ctx.flush();
+    } finally {
+      ctx.close(true);
+    }
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    expect(await cmdChat([], lineStream('/recent\n/raw\n:exit\n'))).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled(); // both /recent and /raw are local
+    expect(logs.join('\n')).toContain('follow-up memory raw text');
+    expect(logs.join('\n')).toContain('記憶の原文');
+    expect(logs.join('\n')).not.toContain('No grounded answer');
+  });
+
+  it('/inventory after /recent reports current-scope vs realm-wide counts', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'seed event');
+    const ctx = openRealmLocal(base);
+    try {
+      const claim = putIndexedClaimWithStates(ctx, 'single current-scope memory', ['lbl_default'], ['proj_default'], {
+        scopeState: 'inferred',
+      });
+      ctx.store.putClaim({ ...claim, confidence: 1, created_by: 'user' });
+      ctx.flush();
+    } finally {
+      ctx.close(true);
+    }
+    process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
+    process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.chdir(projectRoot);
+
+    expect(await cmdChat([], lineStream('/recent\n/inventory\n:exit\n'))).toBe(0);
+    expect(logs.join('\n')).toContain('single current-scope memory');
+    expect(logs.join('\n')).toContain('今のスコープ');
+    expect(logs.join('\n')).toContain('Realm全体の記憶');
+  });
+
+  it('resolved scope but a remote model without opt-in: REPL runs; prose is refused at generation (no egress)', async () => {
+    const base = basePath();
+    const projectRoot = path.join(tmp, 'proj');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
+    // Scope RESOLVES (we are inside the project), so the REPL starts. /status is local
+    // and works. The prose turn lazily resolves the output model, which refuses the
+    // remote endpoint for lack of opt-in (no fetch, no egress) — the session keeps going.
     process.env.MEMORING_LLM_BASE_URL = 'https://api.deepseek.com/v1';
     process.env.MEMORING_LLM_MODEL = 'deepseek-chat';
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     process.chdir(projectRoot);
 
-    expect(await cmdChat([], lineStream('better-sqlite3\n:exit\n'))).toBe(1);
-    expect(fetchMock).not.toHaveBeenCalled(); // REPL never started → no model call
-    expect(errors.join('\n')).toContain('MEMORING_LLM_REMOTE_OPT_IN'); // calibrated refusal
+    expect(await cmdChat([], lineStream('/status\nbetter-sqlite3\n:exit\n'))).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled(); // remote refused before any call → no egress
+    expect(logs.join('\n')).toContain('記憶: default'); // /status still worked without a model (ja)
+    expect(errors.join('\n')).toContain('MEMORING_LLM_REMOTE_OPT_IN'); // calibrated refusal at generation time
     expect(logs.join('\n')).not.toContain('memoring:ouroboros'); // nothing rendered
   });
 
@@ -292,17 +547,18 @@ describe('cmdChat end-to-end (dispatch → scope gate → REPL)', () => {
     createIndexedReplica(base, 'default', projectRoot, 'the project database is better-sqlite3');
     process.env.MEMORING_LLM_BASE_URL = 'http://127.0.0.1:11434/v1';
     process.env.MEMORING_LLM_MODEL = 'qwen2.5:3b';
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ choices: [{ message: { content: 'You use better-sqlite3.' } }] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    );
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      const content = call++ === 0 ? '{"tool":"browse_memories","args":{}}' : '{"answer":"You use better-sqlite3."}';
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
     vi.stubGlobal('fetch', fetchMock);
     process.chdir(projectRoot);
 
     expect(await cmdChat([], lineStream('better-sqlite3\n'))).toBe(0); // stream ends, no :exit
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // tool observation + grounded answer
   });
 });

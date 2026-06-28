@@ -40,9 +40,6 @@ export const NON_EVIDENCE_ORIGINS: ReadonlySet<Origin> = new Set([
 export function isIndependentEvidenceOrigin(o: Origin): boolean {
   return INDEPENDENT_EVIDENCE_ORIGINS.has(o);
 }
-export function canBeEvidenceAtAll(o: Origin): boolean {
-  return !NON_EVIDENCE_ORIGINS.has(o);
-}
 
 // ── Safety / sensitivity ──────────────────────────────────────────────────
 /** sensitivity — 5 values. `unclassified` is NOT here (it is a scope-axis notion). */

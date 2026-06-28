@@ -8,6 +8,7 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { aeadOpen, aeadSeal } from '@security/crypto-primitives';
 import { STORE_FORMAT_VERSION } from '@core/schema/versions';
@@ -55,6 +56,27 @@ function pidIsAlive(pid: number): boolean {
   }
 }
 
+/** Is the lock owner genuinely a live Memoring holder, or a stale lock to reclaim?
+ *  A dead pid is clearly stale. A LIVE pid may be a RECYCLED pid (the OS reassigned the
+ *  old holder's number to an unrelated process) — that is exactly what bricks startup:
+ *  the pid looks alive forever, so the lock is never reclaimed. We confirm via the
+ *  process command and reclaim when it is clearly NOT a Memoring process. Fail-safe: if
+ *  we cannot tell (ps unavailable / ambiguous), treat it as a live holder and do NOT
+ *  reclaim — a false reclaim (two writers on one realm) is far worse than a stale lock. */
+function lockHolderIsStale(pid: number): boolean {
+  if (pid === process.pid) return false; // our own live lock — never reclaim
+  if (!pidIsAlive(pid)) return true;
+  try {
+    const out = spawnSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 2000 });
+    const cmd = out.status === 0 && typeof out.stdout === 'string' ? out.stdout.toLowerCase() : '';
+    // A real holder runs the Memoring CLI (…/apps/cli/main.ts, or the `memoring` bin).
+    if (cmd && !cmd.includes('memoring') && !cmd.includes('main.ts')) return true; // recycled pid → stale
+  } catch {
+    /* ps unavailable → conservative: treat as a live holder */
+  }
+  return false;
+}
+
 const LOCK_RETRY_INTERVAL_MS = 100;
 const DEFAULT_LOCK_MAX_WAIT_MS = 2000;
 
@@ -86,7 +108,7 @@ function acquireReplicaLock(blobPath: string): ReplicaLock {
       const err = e as NodeJS.ErrnoException;
       if (err.code !== 'EEXIST') throw e;
       const owner = readLockFile(lockPath);
-      if (owner?.pid && !pidIsAlive(owner.pid)) {
+      if (owner?.pid && lockHolderIsStale(owner.pid)) {
         try {
           fs.unlinkSync(lockPath);
           continue; // stale lock cleared → retry immediately
