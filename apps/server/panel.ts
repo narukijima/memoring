@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { basePath, replicaLayout } from '@core/paths';
 import { readRealmConfig, writeRealmConfig } from '@core/realm';
-import { isLoopback } from '@integrations/llm/openai-compatible';
+import { fetchLoopbackModels, resolveModelStatus } from '@integrations/llm/model-config';
 import {
   ensureLegacyRegistered,
   getCurrent,
@@ -347,40 +347,28 @@ function activeRealmToml(opts: PanelOptions): string {
   return replicaLayout(opts.root).realmToml;
 }
 
-/** Best-effort model list from an OpenAI-compatible endpoint. Only LOOPBACK URLs
- *  are queried — the panel never makes an off-device call — and any failure (or a
- *  remote endpoint) yields []. The fetch carries no memory text: it lists models. */
-async function fetchEndpointModels(baseUrl: string): Promise<string[]> {
-  if (!isLoopback(baseUrl)) return [];
-  const url = baseUrl.replace(/\/+$/, '') + '/models';
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1500);
-  try {
-    const headers: Record<string, string> = {};
-    const key = process.env.MEMORING_LLM_API_KEY;
-    if (key) headers.authorization = `Bearer ${key}`;
-    const r = await fetch(url, { headers, signal: controller.signal });
-    if (!r.ok) return [];
-    const body = (await r.json()) as { data?: Array<{ id?: unknown }> };
-    if (!Array.isArray(body.data)) return [];
-    return body.data
-      .map((m) => (typeof m.id === 'string' ? m.id : ''))
-      .filter((id): id is string => id.length > 0)
-      .sort((a, b) => a.localeCompare(b));
-  } catch {
-    return [];
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function handleLlm(res: ServerResponse, opts: PanelOptions): Promise<void> {
   const llm = readRealmConfig(activeRealmToml(opts)).llm;
+  const status = resolveModelStatus('output', llm);
   if (!llm) {
-    sendJson(res, 200, { configured: false, model: null, base_url: null, egress: null, loopback: false, models: [] });
+    sendJson(res, 200, {
+      configured: false,
+      model: null,
+      base_url: null,
+      egress: null,
+      effective_egress: status.egress ?? null,
+      loopback: false,
+      models: [],
+      model_source: status.modelSource,
+      base_url_source: status.baseSource,
+      remote_opt_in: status.remoteOptIn,
+      usable: false,
+      issue: status.issue ?? 'model unset',
+    });
     return;
   }
-  const models = await fetchEndpointModels(llm.base_url);
+  const modelResult = await fetchLoopbackModels(llm.base_url, { apiKey: process.env.MEMORING_LLM_API_KEY });
+  const models = modelResult.models;
   // Always surface the configured model even if discovery returned nothing
   // (endpoint down, or a remote endpoint the panel does not query).
   const merged = models.includes(llm.model) ? models : [llm.model, ...models];
@@ -389,7 +377,16 @@ async function handleLlm(res: ServerResponse, opts: PanelOptions): Promise<void>
     model: llm.model,
     base_url: llm.base_url,
     egress: llm.egress ?? null,
-    loopback: isLoopback(llm.base_url),
+    effective_egress: status.egress ?? null,
+    loopback: status.loopback,
+    model_source: status.modelSource,
+    base_url_source: status.baseSource,
+    remote_opt_in: status.remoteOptIn,
+    usable: status.usable,
+    issue: status.issue ?? null,
+    models_query: modelResult.queried ? (modelResult.error ? 'error' : 'ok') : 'skipped',
+    models_error: modelResult.error ?? null,
+    models_skip_reason: modelResult.skippedReason ?? null,
     models: merged,
   });
 }
@@ -400,9 +397,12 @@ async function handleLlmSetModel(res: ServerResponse, opts: PanelOptions, body: 
   const tomlPath = activeRealmToml(opts);
   const config = readRealmConfig(tomlPath);
   if (!config.llm) throw new PanelError(409, 'llm_not_configured');
-  // Switch ONLY the model among those the already-configured endpoint serves;
-  // base_url/egress are preserved so the panel cannot change the egress posture
-  // (a local→remote switch stays a deliberate CLI/env operation).
+  const models = await fetchLoopbackModels(config.llm.base_url, { apiKey: process.env.MEMORING_LLM_API_KEY });
+  if (!models.queried) throw new PanelError(409, models.skippedReason === 'proxy_remote' ? 'llm_proxy_remote' : 'llm_not_loopback');
+  if (models.error) throw new PanelError(409, 'llm_models_unavailable');
+  if (!models.models.includes(model)) throw new PanelError(400, 'model_not_offered');
+  // Switch ONLY among models returned by the already-configured loopback endpoint;
+  // base_url/egress are preserved so the panel cannot change egress posture.
   config.llm = { ...config.llm, model };
   writeRealmConfig(tomlPath, config);
   sendJson(res, 200, { model });

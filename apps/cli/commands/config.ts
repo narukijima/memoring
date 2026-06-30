@@ -5,15 +5,17 @@ import { isLoopback } from '@integrations/llm/openai-compatible';
 import { replicaLayout } from '@core/paths';
 import { isActiveRealmSilence, resolveActiveReplicaRoot } from '@core/runtime';
 import { readRealmConfig, writeRealmConfig, type RealmLlmConfig } from '@core/realm';
+import { validateConfiguration } from '../config-diagnostics';
 import { parseFlags, type Flags } from '../args';
 
 export async function cmdConfig(argv: string[]): Promise<number> {
   const flags = parseFlags(argv);
   const sub = flags._[0];
   if (sub === 'show') return cmdConfigShow(flags);
+  if (sub === 'validate') return cmdConfigValidate();
   if (sub === 'set' && flags._[1] === 'local-model') return cmdConfigSetLocalModel(flags);
   if ((sub === 'unset' || sub === 'clear') && flags._[1] === 'local-model') return cmdConfigUnsetLocalModel(flags);
-  console.error('Usage: memoring config show | set local-model --base-url <url> --model <id> | unset local-model');
+  console.error('Usage: memoring config show | validate | set local-model --base-url <url> --model <id> | unset local-model');
   return 1;
 }
 
@@ -36,6 +38,25 @@ function cmdConfigShow(flags: Flags): number {
   const config = readRealmConfig(configPath);
   console.log(`  Realm: ${config.name} (${config.realm_id})`);
   printLlm(config.llm);
+  return 0;
+}
+
+function cmdConfigValidate(): number {
+  const result = validateConfiguration();
+  console.log('Memoring config validate');
+  for (const diagnostic of result.diagnostics) {
+    const tag = diagnostic.level === 'ok' ? 'ok' : diagnostic.level;
+    console.log(`  [${tag}] ${diagnostic.message}`);
+  }
+  if (result.errorCount > 0) {
+    console.log(`  Result: ${result.errorCount} error(s), ${result.warningCount} warning(s).`);
+    return 1;
+  }
+  if (result.warningCount > 0) {
+    console.log(`  Result: ${result.warningCount} warning(s).`);
+    return 0;
+  }
+  console.log('  Result: ok.');
   return 0;
 }
 
