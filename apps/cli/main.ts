@@ -21,6 +21,8 @@ import { cmdRekey } from './commands/rekey';
 import { cmdRealm } from './commands/realm';
 import { cmdImport } from './commands/import';
 import { cmdConfig } from './commands/config';
+import { cmdConfigure } from './commands/configure';
+import { cmdModels } from './commands/models';
 import { cmdStatus } from './commands/status';
 import { cmdHealth } from './commands/health';
 import { cmdAtlas } from './commands/atlas';
@@ -66,6 +68,9 @@ Usage:
   memoring config set local-model --base-url <url> --model <id>
                                           Persist a loopback local LLM default in realm.toml.
   memoring config unset local-model       Clear the persisted local LLM default.
+  memoring config validate                Validate realm.toml / realms.toml metadata.
+  memoring configure                      Guided local-first setup for Realm + local model.
+  memoring models status                  Show effective loop/output model configuration.
   memoring connect <connector> [opts]    Detect sources, choose include/exclude + Realm assignment.
       connectors: claude-code
       --all | --source <id>              Selection (no whole-tool default).
@@ -175,6 +180,10 @@ async function main(): Promise<number> {
       return cmdRealm(rest);
     case 'config':
       return cmdConfig(rest);
+    case 'configure':
+      return cmdConfigure(rest);
+    case 'models':
+      return cmdModels(rest);
     case 'connect':
       return cmdConnect(rest);
     case 'import':

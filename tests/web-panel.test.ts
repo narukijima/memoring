@@ -10,6 +10,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openRealmLocal } from '@core/runtime';
 import { readRegistry } from '@core/realm-registry';
+import { replicaLayout } from '@core/paths';
+import { readRealmConfig, writeRealmConfig } from '@core/realm';
 import { ingestImport } from '@intake/import-from-ai';
 import { getOrCreateLabel } from '@claim/classify';
 import { searchRealm } from '@retrieval/search';
@@ -350,6 +352,110 @@ describe('web control panel — security gate + owner write surface', () => {
       expect(hits.some((h) => h.ref_type === 'claim')).toBe(true);
     } finally {
       verify.close(false);
+    }
+  });
+
+  it('exposes model status but only lets the panel switch to loopback-offered models', async () => {
+    const config = readRealmConfig(replicaLayout(home).realmToml);
+    config.llm = { base_url: 'http://127.0.0.1:11434/v1', model: 'gemma4:latest', egress: 'local' };
+    writeRealmConfig(replicaLayout(home).realmToml, config);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
+      JSON.stringify({ data: [{ id: 'gemma4:latest' }, { id: 'qwen2.5:3b' }] }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      },
+    ));
+    try {
+      const status = await request({ port: panel.port, path: '/api/llm', token: TOKEN });
+      expect(status.status).toBe(200);
+      const body = JSON.parse(status.text) as { configured: boolean; loopback: boolean; models: string[]; effective_egress: string };
+      expect(body).toMatchObject({ configured: true, loopback: true, effective_egress: 'local' });
+      expect(body.models).toContain('qwen2.5:3b');
+
+      const refused = await request({
+        port: panel.port,
+        method: 'POST',
+        path: '/api/llm/model',
+        token: TOKEN,
+        body: { model: 'not-returned' },
+      });
+      expect(refused.status).toBe(400);
+      expect(refused.text).toContain('model_not_offered');
+
+      const switched = await request({
+        port: panel.port,
+        method: 'POST',
+        path: '/api/llm/model',
+        token: TOKEN,
+        body: { model: 'qwen2.5:3b' },
+      });
+      expect(switched.status).toBe(200);
+      expect(readRealmConfig(replicaLayout(home).realmToml).llm?.model).toBe('qwen2.5:3b');
+      expect(fetchSpy).toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('refuses model switching when the configured endpoint is remote', async () => {
+    const config = readRealmConfig(replicaLayout(home).realmToml);
+    config.llm = { base_url: 'https://api.example.com/v1', model: 'remote-model', egress: 'remote' };
+    writeRealmConfig(replicaLayout(home).realmToml, config);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const status = await request({ port: panel.port, path: '/api/llm', token: TOKEN });
+    expect(status.status).toBe(200);
+    expect(JSON.parse(status.text)).toMatchObject({ configured: true, loopback: false, effective_egress: 'remote' });
+
+    const switched = await request({
+      port: panel.port,
+      method: 'POST',
+      path: '/api/llm/model',
+      token: TOKEN,
+      body: { model: 'other-remote-model' },
+    });
+    expect(switched.status).toBe(409);
+    expect(switched.text).toContain('llm_not_loopback');
+    expect(readRealmConfig(replicaLayout(home).realmToml).llm?.model).toBe('remote-model');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('treats proxy mode as remote egress and refuses model listing or switching', async () => {
+    const prevProxy = process.env.MEMORING_LLM_PROXY;
+    process.env.MEMORING_LLM_PROXY = '1';
+    const config = readRealmConfig(replicaLayout(home).realmToml);
+    config.llm = { base_url: 'http://127.0.0.1:8787/v1', model: 'proxy-model', egress: 'local' };
+    writeRealmConfig(replicaLayout(home).realmToml, config);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      const status = await request({ port: panel.port, path: '/api/llm', token: TOKEN });
+      expect(status.status).toBe(200);
+      expect(JSON.parse(status.text)).toMatchObject({
+        configured: true,
+        loopback: true,
+        effective_egress: 'remote',
+        usable: false,
+        models_query: 'skipped',
+        models_skip_reason: 'proxy_remote',
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      const switched = await request({
+        port: panel.port,
+        method: 'POST',
+        path: '/api/llm/model',
+        token: TOKEN,
+        body: { model: 'other-proxy-model' },
+      });
+      expect(switched.status).toBe(409);
+      expect(switched.text).toContain('llm_proxy_remote');
+      expect(readRealmConfig(replicaLayout(home).realmToml).llm?.model).toBe('proxy-model');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      if (prevProxy === undefined) delete process.env.MEMORING_LLM_PROXY;
+      else process.env.MEMORING_LLM_PROXY = prevProxy;
     }
   });
 });

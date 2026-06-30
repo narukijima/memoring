@@ -1126,7 +1126,10 @@ export function renderShell(nonce: string): string {
       send: { en: 'Send', ja: '送信' },
       openCollections: { en: 'Open memory collections', ja: 'メモリコレクションを開く' },
       modelLabel: { en: 'Model', ja: 'モデル' },
-      modelOnDevice: { en: 'On-device (rule-based)', ja: 'オンデバイス（ルールベース）' },
+      modelUnsetLocal: { en: 'Local model unset', ja: 'ローカルモデル未設定' },
+      modelRemoteReadOnly: { en: function (m) { return m + ' · remote'; }, ja: function (m) { return m + ' · remote'; } },
+      modelLocalReadOnly: { en: function (m) { return m + ' · local'; }, ja: function (m) { return m + ' · local'; } },
+      modelCandidatesUnavailable: { en: function (m) { return m + ' · local candidates unavailable'; }, ja: function (m) { return m + ' · ローカル候補取得不可'; } },
       modelSwitchFailed: { en: function (s) { return 'Could not switch model (' + s + ').'; }, ja: function (s) { return 'モデルを切り替えできませんでした (' + s + ')。'; } },
       appearanceToLight: { en: 'Switch to light', ja: 'ライトに切り替え' },
       appearanceToDark: { en: 'Switch to dark', ja: 'ダークに切り替え' },
@@ -1760,11 +1763,28 @@ export function renderShell(nonce: string): string {
     function renderModelPicker(data) {
       modelSelect.replaceChildren();
       if (!data || !data.configured) {
-        // No LLM endpoint configured → the on-device rule-based provider. Shown as
-        // a single, non-actionable label (configuring an endpoint is a CLI op).
-        addText(modelSelect, 'option', t('modelOnDevice'));
+        // No editable endpoint is configured. Endpoint setup is CLI-only so the
+        // panel cannot toggle egress posture or write provider coordinates.
+        addText(modelSelect, 'option', t('modelUnsetLocal'));
         modelSelect.disabled = true;
         modelPicker.classList.add('disabled');
+        modelPicker.title = t('modelUnsetLocal');
+        modelPicker.hidden = false;
+        return;
+      }
+      if (!data.loopback) {
+        addText(modelSelect, 'option', t('modelRemoteReadOnly', data.model || 'remote'));
+        modelSelect.disabled = true;
+        modelPicker.classList.add('disabled');
+        modelPicker.title = t('modelRemoteReadOnly', data.model || 'remote');
+        modelPicker.hidden = false;
+        return;
+      }
+      if (data.models_query !== 'ok') {
+        addText(modelSelect, 'option', t('modelCandidatesUnavailable', data.model || 'local'));
+        modelSelect.disabled = true;
+        modelPicker.classList.add('disabled');
+        modelPicker.title = t('modelCandidatesUnavailable', data.model || 'local');
         modelPicker.hidden = false;
         return;
       }
@@ -1772,12 +1792,13 @@ export function renderShell(nonce: string): string {
       for (const m of models) {
         const opt = document.createElement('option');
         opt.value = m;
-        opt.textContent = m;
+        opt.textContent = t('modelLocalReadOnly', m);
         modelSelect.appendChild(opt);
       }
       modelSelect.value = data.model;
       modelSelect.disabled = false;
       modelPicker.classList.remove('disabled');
+      modelPicker.title = t('modelLocalReadOnly', data.model);
       modelPicker.hidden = false;
     }
 
