@@ -9,8 +9,9 @@ import { getConnector } from '@intake/registry';
 import type { CaptureMethod } from './schema/enums';
 import type { MemEvent } from './schema/entities';
 import { classifyEvent } from '@claim/classify';
-import { abstractEvents } from '@claim/extractor';
+import { abstractEvents, readClaimStatement } from '@claim/extractor';
 import { consolidatePending } from '@claim/consolidation';
+import { promoteBackfillCandidateToClaim, recordReflectionForClaimCandidate } from '@claim/reflection';
 import { indexClaim, indexEvent } from '@retrieval/search';
 import { RuleBasedProvider, type MemoryProvider } from '@claim/provider';
 import type { RealmContext } from './runtime';
@@ -29,6 +30,9 @@ export interface LoopStats {
   /** Abstraction batches that errored (model/network/timeout) and were skipped —
    *  the run continues; this surfaces incomplete LLM coverage (never a silent drop). */
   abstractFailures: number;
+  reflectionCandidates: number;
+  reflectionReports: number;
+  shadowTrials: number;
   consolidated: number;
   rejected: number;
 }
@@ -53,6 +57,9 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
     candidates: 0,
     merged: 0,
     abstractFailures: 0,
+    reflectionCandidates: 0,
+    reflectionReports: 0,
+    shadowTrials: 0,
     consolidated: 0,
     rejected: 0,
   };
@@ -101,10 +108,20 @@ export async function runLoop(ctx: RealmContext, opts: LoopOptions = {}): Promis
   for (const event of classifiedEvents) indexEvent(ctx, event);
 
   // ── abstract → candidates. ───────────────────────────────────────────────────
-  const abstractResult = await abstractEvents(ctx, provider, classifiedEvents, now);
-  stats.candidates += abstractResult.newCandidates.length;
+  const abstractResult = await abstractEvents(ctx, provider, classifiedEvents, now, { persistClaims: method !== 'backfill' });
+  if (method !== 'backfill') stats.candidates += abstractResult.newCandidates.length;
   stats.merged += abstractResult.merged;
   stats.abstractFailures = abstractResult.failed;
+  if (method === 'backfill') {
+    for (const claim of abstractResult.newCandidates) {
+      const reflected = recordReflectionForClaimCandidate(ctx, claim, readClaimStatement(ctx, claim), now);
+      stats.reflectionCandidates += reflected.candidate.status === 'candidate' ? 1 : 0;
+      stats.reflectionReports += 1;
+      stats.shadowTrials += 1;
+      const promoted = promoteBackfillCandidateToClaim(ctx, reflected.candidate.backfill_candidate_id, now);
+      if (promoted.kind === 'promoted') stats.candidates += 1;
+    }
+  }
   if (stats.abstractFailures > 0) {
     log.warn('loop:abstract_failures', { count: stats.abstractFailures });
   }

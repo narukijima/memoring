@@ -4,6 +4,7 @@
 import type { RealmContext } from '@core/runtime';
 import type { Claim } from '@core/schema/entities';
 import { reinforcement } from './lifecycle';
+import { recordRankingSurface } from '@retrieval/ranking-signals';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const AGE_DECAY_DAYS = 365;
@@ -58,6 +59,7 @@ export function recordRecall(ctx: RealmContext, claimIds: string[], now: Date): 
     const claim = ctx.store.getClaim(claimId);
     if (!claim || claim.status === 'redacted' || claim.status === 'rejected') continue;
     setRecallCount(ctx, claimId, getRecallCount(ctx, claimId) + 1);
+    recordRankingSurface(ctx, claimId, now);
     recomputeReinforcement(ctx, claim, now);
   }
 }

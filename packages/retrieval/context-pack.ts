@@ -20,6 +20,7 @@ import { validateClaim } from '@claim/validator';
 import { resolveActiveLabelIds } from './active-scope';
 import { claimScope } from './claim-scope';
 import { proposeNeighbors } from './associate';
+import { rankingMetadataAfterGate } from './ranking';
 import type { Aperture, Audience, ClassificationState } from '@core/schema/enums';
 import type { Claim, ContextPack } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
@@ -146,6 +147,7 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   const passed: ScopedClaim[] = [];
   const conflictsOpen: ScopedClaim[] = [];
   const staleOpen: ScopedClaim[] = [];
+  const rankingScores = new Map<string, number>();
   let dropped = 0;
   for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'consolidated')) {
     const sc = toScopedClaim(ctx, claim);
@@ -153,9 +155,15 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
       dropped += 1;
       continue;
     }
-    if (!gate(toGateItem(ctx, sc), req).pass) {
+    const item = toGateItem(ctx, sc);
+    if (!gate(item, req).pass) {
       dropped += 1;
       continue;
+    }
+    const metadata = rankingMetadataAfterGate(ctx, claim, item, req, now);
+    if (metadata) {
+      ctx.store.putRankingMetadata(metadata);
+      rankingScores.set(claim.claim_id, metadata.score);
     }
     // A consolidated claim past its valid_until is time-expired: do not present it
     // as current guidance — surface it as a stale warning instead (§3.2 section 9).
@@ -167,9 +175,15 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
   // as stale warnings (the Gate still hides secret / out-of-scope superseded claims).
   for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'superseded')) {
     const sc = toScopedClaim(ctx, claim);
-    if (claimBridgeContained(sc, activeLabelIds) && gate(toGateItem(ctx, sc), req).pass)
+    const item = toGateItem(ctx, sc);
+    if (claimBridgeContained(sc, activeLabelIds) && gate(item, req).pass) {
+      const metadata = rankingMetadataAfterGate(ctx, claim, item, req, now);
+      if (metadata) {
+        ctx.store.putRankingMetadata(metadata);
+        rankingScores.set(claim.claim_id, metadata.score);
+      }
       staleOpen.push({ ...sc, staleReason: 'superseded' });
-    else dropped += 1;
+    } else dropped += 1;
   }
   for (const claim of ctx.store.listClaimsByStatus(ctx.realmId, 'conflicted')) {
     // A near-duplicate (§1.5) is conflicted only to suppress it — it is not a
@@ -202,10 +216,12 @@ export function buildContext(ctx: RealmContext, opts: BuildOptions): BuildResult
     }
   }
 
-  // 3. Ranking (after the Gate): reinforcement desc, then recency.
+  // 3. Ranking (after the Gate): ranking metadata, then reinforcement, then recency.
   passed.sort((a, b) => {
     const associationTier = Number(a.associated === true) - Number(b.associated === true);
     if (associationTier !== 0) return associationTier;
+    const rs = (rankingScores.get(b.claim.claim_id) ?? 0) - (rankingScores.get(a.claim.claim_id) ?? 0);
+    if (rs !== 0) return rs;
     const r = b.claim.reinforcement_score - a.claim.reinforcement_score;
     if (r !== 0) return r;
     return b.claim.valid_from.localeCompare(a.claim.valid_from);

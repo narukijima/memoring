@@ -87,6 +87,17 @@ describe('loop end-to-end (gates 1–8, 11–13)', () => {
     expect(stats.quarantined).toBe(0);
     expect(stats.consolidated).toBe(3); // constraint, preference, decision
     expect(stats.candidates).toBe(3);
+    expect(stats.reflectionCandidates).toBe(3);
+    expect(stats.reflectionReports).toBe(3);
+    expect(stats.shadowTrials).toBe(3);
+    expect(realm.ctx.store.listBackfillCandidatesByStatus(realm.ctx.realmId, 'candidate')).toHaveLength(0);
+    expect(realm.ctx.store.listBackfillCandidatesByStatus(realm.ctx.realmId, 'promoted')).toHaveLength(3);
+    const evals = realm.ctx.store.listEvalReports(realm.ctx.realmId);
+    expect(evals).toHaveLength(3);
+    expect(evals.every((r) => r.verdict === 'helpful')).toBe(true);
+    for (const claim of realm.ctx.store.listClaimsByStatus(realm.ctx.realmId, 'consolidated')) {
+      expect(realm.ctx.store.getDerivation(claim.created_by_derivation_id!)?.derivation_type).toBe('backfill_candidate');
+    }
   });
 
   it('is idempotent: a second run captures/consolidates nothing new (idle convergence, §4.13)', async () => {

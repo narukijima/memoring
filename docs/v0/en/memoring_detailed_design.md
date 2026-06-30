@@ -427,7 +427,7 @@ The provenance of a derivation by AI / Recipe. AI-derived records point to it vi
 {
   "derivation_id": "der_01J...",
   "realm_id": "realm_01J...",
-  "derivation_type": "scope_classify | sensitivity_classify | consolidate | abstract | label_suggest",
+  "derivation_type": "scope_classify | sensitivity_classify | consolidate | abstract | label_suggest | backfill_candidate | shadow_trial",
   "input_event_identities": ["eid:hmac:..."],
   "input_claim_ids": ["clm_..."],
   "model_provider": "local | <provider>",
@@ -445,6 +445,14 @@ The provenance of a derivation by AI / Recipe. AI-derived records point to it vi
 ```
 
 Derivation is provenance for audit and reproduction and is not itself evidence. Output differences for the same input are compared in eval, and the Core schema is not changed. The default on a Recipe change is no auto-retroactive, and application to existing records is by explicit reprocess (§9.4 / Chapter 10). A legacy record is tied to a placeholder Derivation with `derivation_id=legacy`.
+
+### 1.11.1 Reflection Lane / BackfillCandidate / diagnostic reports
+
+The Reflection Lane is a Derivation-only lane. It may analyze historical Events and Claims, but its output is generated analysis metadata, not Claim truth and not evidence. Reflection output must not enter `Claim.evidence_event_identities`, must not increase independent evidence count, and must not directly consolidate a Claim.
+
+BackfillCandidate is the grounded candidate record produced from historical logs. In the backfill path, abstraction output must first become a BackfillCandidate; a normal Claim `candidate` is created only after the BackfillCandidate passes the grounded-only promotion barrier. Each BackfillCandidate stores `source_event_identities`, accepted evidence refs, rejected evidence refs and rejection reasons, risk flags (`stale / cross_scope / weak_origin / conflict / sensitivity_unknown / self_generated`), `created_by_derivation_id`, authority/confidence needed for validator thresholds, and a status of `candidate / quarantined / rejected / promoted`. A BackfillCandidate with no valid Event identity or no accepted evidence reference is quarantined or rejected. Promotion from BackfillCandidate creates only an ordinary Claim `candidate`; the existing validator then decides whether it consolidates.
+
+ReflectionReport exposes `candidate_id`, surfaced reason, accepted evidence refs, rejected evidence refs and rejection reason, risk flags, and suggested action (`keep_candidate / defer / reject`). EvalReport compares baseline and candidate-augmented context/output with verdict `helpful / neutral / harmful`, reason, risk flags, and evidence refs. ReflectionReport and EvalReport are visible through local diagnostics such as health, but only as ids/counts/actions/risk/verdicts; candidate statement text is not printed there. ReflectionReport and EvalReport are diagnostic artifacts; they are not evidence, do not confirm sensitivity or scope, do not declassify, and do not directly promote or consolidate a Claim.
 
 ### 1.12 SealRule
 
@@ -797,6 +805,8 @@ The AI's confidence and a tunable Recipe do not loosen safety. Only policy and v
 ### 3.6 ranking (§13.3, after the Gate)
 
 ranking is a quality adjustment applied only to items that have passed the Gate. The ranking coefficients / floors are tunables owned by the Recipe and are given in Chapter 10. A safety floor can be changed only toward the safe side. For the initial values of the score formula and floor / ceiling, see §10.3.
+
+Ranking metadata may include `recall_count`, `distinct_query_count`, `distinct_day_count`, `correction_count`, `conflict_count`, and `stale_signal`. These signals affect ordering only after `gate(x, r)` is true. When `¬gate(x, r)`, the item has no ranking score and no rankable metadata for that request. A helpful EvalReport or ReflectionReport may affect review priority or ranking metadata only through this Gate-after-ranking path; it does not create evidence, confirmation, declassification, or consolidation.
 
 ---
 

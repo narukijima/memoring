@@ -3,16 +3,20 @@
 import type { Db } from './encrypted-db';
 import type {
   Assignment,
+  BackfillCandidate,
   Chronicle,
   Claim,
   ConnectorInstance,
   ContextPack,
   Derivation,
+  EvalReport,
   Label,
   MemEvent,
   Occurrence,
   Project,
   QuarantineRecord,
+  RankingMetadata,
+  ReflectionReport,
   SealRule,
   SecretScanResult,
   Session,
@@ -352,6 +356,106 @@ export class Store {
   // ── derivation / context pack ───────────────────────────────────────────────
   putDerivation(d: Derivation): void {
     this.upsert('derivation', { derivation_id: d.derivation_id, realm_id: d.realm_id, doc: JSON.stringify(d) });
+  }
+  getDerivation(id: string): Derivation | undefined {
+    return this.parseDoc<Derivation>(
+      this.db.prepare('SELECT doc FROM derivation WHERE derivation_id = ?').get(id) as
+        | { doc: string }
+        | undefined,
+    );
+  }
+  putBackfillCandidate(c: BackfillCandidate): void {
+    this.upsert('backfill_candidate', {
+      backfill_candidate_id: c.backfill_candidate_id,
+      realm_id: c.realm_id,
+      status: c.status,
+      doc: JSON.stringify(c),
+    });
+  }
+  getBackfillCandidate(id: string): BackfillCandidate | undefined {
+    return this.parseDoc<BackfillCandidate>(
+      this.db.prepare('SELECT doc FROM backfill_candidate WHERE backfill_candidate_id = ?').get(id) as
+        | { doc: string }
+        | undefined,
+    );
+  }
+  listBackfillCandidatesByStatus(realmId: string, status: BackfillCandidate['status']): BackfillCandidate[] {
+    return this.parseDocs<BackfillCandidate>(
+      this.db.prepare('SELECT doc FROM backfill_candidate WHERE realm_id = ? AND status = ?').all(realmId, status) as {
+        doc: string;
+      }[],
+    );
+  }
+  putReflectionReport(r: ReflectionReport): void {
+    this.upsert('reflection_report', {
+      reflection_report_id: r.reflection_report_id,
+      realm_id: r.realm_id,
+      candidate_id: r.candidate_id,
+      doc: JSON.stringify(r),
+    });
+  }
+  getReflectionReport(id: string): ReflectionReport | undefined {
+    return this.parseDoc<ReflectionReport>(
+      this.db.prepare('SELECT doc FROM reflection_report WHERE reflection_report_id = ?').get(id) as
+        | { doc: string }
+        | undefined,
+    );
+  }
+  listReflectionReports(realmId: string): ReflectionReport[] {
+    return this.parseDocs<ReflectionReport>(
+      this.db.prepare('SELECT doc FROM reflection_report WHERE realm_id = ?').all(realmId) as { doc: string }[],
+    );
+  }
+  listReflectionReportsForCandidate(realmId: string, candidateId: string): ReflectionReport[] {
+    return this.parseDocs<ReflectionReport>(
+      this.db.prepare('SELECT doc FROM reflection_report WHERE realm_id = ? AND candidate_id = ?').all(realmId, candidateId) as {
+        doc: string;
+      }[],
+    );
+  }
+  putEvalReport(r: EvalReport): void {
+    this.upsert('eval_report', {
+      eval_report_id: r.eval_report_id,
+      realm_id: r.realm_id,
+      candidate_id: r.candidate_id,
+      verdict: r.verdict,
+      doc: JSON.stringify(r),
+    });
+  }
+  getEvalReport(id: string): EvalReport | undefined {
+    return this.parseDoc<EvalReport>(
+      this.db.prepare('SELECT doc FROM eval_report WHERE eval_report_id = ?').get(id) as
+        | { doc: string }
+        | undefined,
+    );
+  }
+  listEvalReports(realmId: string): EvalReport[] {
+    return this.parseDocs<EvalReport>(
+      this.db.prepare('SELECT doc FROM eval_report WHERE realm_id = ?').all(realmId) as { doc: string }[],
+    );
+  }
+  listEvalReportsForCandidate(realmId: string, candidateId: string): EvalReport[] {
+    return this.parseDocs<EvalReport>(
+      this.db.prepare('SELECT doc FROM eval_report WHERE realm_id = ? AND candidate_id = ?').all(realmId, candidateId) as {
+        doc: string;
+      }[],
+    );
+  }
+  putRankingMetadata(r: RankingMetadata): void {
+    this.upsert('ranking_metadata', {
+      ranking_metadata_id: r.ranking_metadata_id,
+      realm_id: r.realm_id,
+      target_type: r.target_type,
+      target_id: r.target_id,
+      doc: JSON.stringify(r),
+    });
+  }
+  listRankingMetadataForTarget(realmId: string, targetType: string, targetId: string): RankingMetadata[] {
+    return this.parseDocs<RankingMetadata>(
+      this.db
+        .prepare('SELECT doc FROM ranking_metadata WHERE realm_id = ? AND target_type = ? AND target_id = ?')
+        .all(realmId, targetType, targetId) as { doc: string }[],
+    );
   }
   putContextPack(c: ContextPack): void {
     this.upsert('context_pack', {

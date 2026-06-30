@@ -155,7 +155,10 @@ export interface Derivation {
     | 'sensitivity_classify'
     | 'consolidate'
     | 'abstract'
-    | 'label_suggest';
+    | 'label_suggest'
+    | 'reflection_lane'
+    | 'backfill_candidate'
+    | 'shadow_trial';
   input_event_identities: string[];
   input_claim_ids: string[];
   model_provider: string;
@@ -166,6 +169,82 @@ export interface Derivation {
   recipe_id: string;
   validator_version: string;
   output_digest: string;
+  created_at: string;
+  schema_version: string;
+}
+
+export type ReflectionRiskFlag =
+  | 'stale'
+  | 'cross_scope'
+  | 'weak_origin'
+  | 'conflict'
+  | 'sensitivity_unknown'
+  | 'self_generated';
+
+export type ReflectionSuggestedAction = 'keep_candidate' | 'defer' | 'reject';
+
+export interface ReflectionEvidenceRef {
+  event_identity: string;
+  reason?: string;
+}
+
+export interface BackfillCandidate {
+  backfill_candidate_id: string;
+  realm_id: string;
+  kind: ClaimKind;
+  statement_ref: string;
+  status: 'candidate' | 'quarantined' | 'rejected' | 'promoted';
+  created_by: 'ai' | 'rule';
+  confidence: number;
+  source_event_identities: string[];
+  accepted_evidence_refs: ReflectionEvidenceRef[];
+  rejected_evidence_refs: ReflectionEvidenceRef[];
+  risk_flags: ReflectionRiskFlag[];
+  created_by_derivation_id: string;
+  created_at: string;
+  schema_version: string;
+}
+
+export interface ReflectionReport {
+  reflection_report_id: string;
+  realm_id: string;
+  candidate_id: string;
+  surfaced_reason: string;
+  accepted_evidence_refs: ReflectionEvidenceRef[];
+  rejected_evidence_refs: ReflectionEvidenceRef[];
+  risk_flags: ReflectionRiskFlag[];
+  suggested_action: ReflectionSuggestedAction;
+  created_by_derivation_id: string;
+  created_at: string;
+  schema_version: string;
+}
+
+export interface EvalReport {
+  eval_report_id: string;
+  realm_id: string;
+  candidate_id: string;
+  verdict: 'helpful' | 'neutral' | 'harmful';
+  reason: string;
+  risk_flags: ReflectionRiskFlag[];
+  evidence_refs: ReflectionEvidenceRef[];
+  created_by_derivation_id: string;
+  created_at: string;
+  schema_version: string;
+}
+
+export interface RankingMetadata {
+  ranking_metadata_id: string;
+  realm_id: string;
+  target_type: 'claim';
+  target_id: string;
+  recall_count: number;
+  distinct_query_count: number;
+  distinct_day_count: number;
+  correction_count: number;
+  conflict_count: number;
+  stale_signal: boolean;
+  score: number;
+  computed_after_gate: true;
   created_at: string;
   schema_version: string;
 }

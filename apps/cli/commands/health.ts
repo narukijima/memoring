@@ -47,6 +47,7 @@ export function renderHealthReport(report: HealthReport, limit = 8): string[] {
     ['Orphan labels', report.orphanLabels],
     ['Missing / weak scope assignment', report.weakScopeAssignments],
     ['Unsafe output candidates', report.unsafeOutputCandidates],
+    ['Reflection diagnostics', report.reflectionDiagnostics],
   ];
   for (const [title, issues] of groups) {
     lines.push(`${title}: ${issues.length}`);

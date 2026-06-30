@@ -9,6 +9,7 @@ import { readClaimStatement } from '@claim/extractor';
 import { eventSealSignature, isClaimSuppressed, matchesActivePatternSeal } from '@claim/seal';
 import { activeScopeContainsAll, allowedScopeState, allowedSensitivityState, bestClassificationState } from '@core/policy';
 import { validateClaim } from '@claim/validator';
+import { recordRankingQuery } from './ranking-signals';
 import type { Claim, MemEvent } from '@core/schema/entities';
 import type { RealmContext } from '@core/runtime';
 import type { IndexHit } from '@storage/repositories';
@@ -135,6 +136,7 @@ export function searchRealm(ctx: RealmContext, query: string, opts: SearchOption
       snippet: snippet(hit.norm_text, nq),
       sensitivity: hit.sensitivity,
     });
+    if (hit.ref_type === 'claim') recordRankingQuery(ctx, hit.ref_id, query);
     if (out.length >= limit) break;
   }
   return out;
