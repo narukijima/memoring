@@ -585,6 +585,16 @@ Memoring 生成文脈は evidence にしない:
 Gate First:
   secret / unknown / confidential / scope 外は ranking に到達しない。ranking は安全を緩めない。
 
+Reflection Lane diagnostics:
+  ReflectionReport と EvalReport は診断 artifact のみである。
+  backfill では、abstraction output は通常の Claim candidate が作られる前に BackfillCandidate を通過しなければならない。
+  historical BackfillCandidate は、promotion 前に original Event identity を参照していなければならない。
+  valid な Event reference を持たない candidate は quarantine または reject する。
+  promotion は Claim candidate を作るだけであり、consolidation は既存 validator が判定する。
+  health は Reflection diagnostics を id / count / action / risk / verdict として表示してよいが、candidate statement text は表示しない。
+  Reflection report、shadow-trial verdict、summary、diary-like text は evidence ではなく、
+  Claim を confirm せず、sensitivity を Declassify しない。
+
 宿主設定を変更しない:
   Memoring は宿主 AI ツールの設定・保持期間・権限を勝手に変更しない。doctor は警告・提案のみ。
 ```

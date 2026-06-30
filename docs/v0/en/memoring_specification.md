@@ -599,6 +599,16 @@ Memoring-generated context is not made evidence:
 Gate First:
   secret / unknown / confidential / out-of-scope do not reach ranking. Ranking does not loosen safety.
 
+Reflection Lane diagnostics:
+  ReflectionReport and EvalReport are diagnostic artifacts only.
+  In backfill, abstraction output must pass through BackfillCandidate before any normal Claim candidate is created.
+  Historical BackfillCandidate records must cite original Event identities before they can be promoted.
+  A candidate without valid Event references is quarantined or rejected.
+  Promotion creates only a Claim candidate; the existing validator decides consolidation.
+  health may show Reflection diagnostics as ids/counts/actions/risk/verdicts, but not candidate statement text.
+  Reflection reports, shadow-trial verdicts, summaries, and diary-like text are not evidence,
+  do not confirm a Claim, and do not declassify sensitivity.
+
 Does not change host settings:
   Memoring does not arbitrarily change the host AI tool's settings / retention period / permissions. doctor only warns / suggests.
 ```

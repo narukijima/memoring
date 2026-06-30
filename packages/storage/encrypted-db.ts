@@ -258,7 +258,14 @@ export class EncryptedDb {
         }
         // Re-apply config + idempotent DDL so format upgrades land on open.
         EncryptedDb.configure(db);
-        reconciled = reconcileObjects(db, path.join(path.dirname(blobPath), 'objects'));
+        if (onDisk !== STORE_FORMAT_VERSION) {
+          db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)').run(
+            'store_format_version',
+            String(STORE_FORMAT_VERSION),
+          );
+          reconciled = true;
+        }
+        reconciled = reconcileObjects(db, path.join(path.dirname(blobPath), 'objects')) || reconciled;
       } else {
         db = new Database(':memory:');
         EncryptedDb.configure(db);

@@ -25,6 +25,7 @@ export interface HealthReport {
   orphanLabels: HealthIssue[];
   weakScopeAssignments: HealthIssue[];
   unsafeOutputCandidates: HealthIssue[];
+  reflectionDiagnostics: HealthIssue[];
 }
 
 function bump(map: Record<string, number>, key: string | null | undefined): void {
@@ -76,6 +77,7 @@ export function buildHealthReport(ctx: RealmContext, now = new Date()): HealthRe
     orphanLabels: [],
     weakScopeAssignments: [],
     unsafeOutputCandidates: [],
+    reflectionDiagnostics: [],
   };
 
   for (const claim of claims) {
@@ -145,6 +147,26 @@ export function buildHealthReport(ctx: RealmContext, now = new Date()): HealthRe
       report.unsafeOutputCandidates.push({
         id: claim.claim_id,
         message: `unsafe class passed diagnostic gate: sensitivity=${claim.sensitivity} labels=${scoped.labelIds.length}`,
+      });
+    }
+  }
+
+  const evalsByCandidate = new Map(ctx.store.listEvalReports(ctx.realmId).map((r) => [r.candidate_id, r]));
+  for (const status of ['candidate', 'quarantined', 'rejected', 'promoted'] as const) {
+    for (const candidate of ctx.store.listBackfillCandidatesByStatus(ctx.realmId, status)) {
+      const reports = ctx.store.listReflectionReportsForCandidate(ctx.realmId, candidate.backfill_candidate_id);
+      const reflection = reports[reports.length - 1];
+      const evaluation = evalsByCandidate.get(candidate.backfill_candidate_id);
+      const rejectedReasons = candidate.rejected_evidence_refs
+        .map((r) => r.reason)
+        .filter((r): r is string => Boolean(r));
+      report.reflectionDiagnostics.push({
+        id: candidate.backfill_candidate_id,
+        message:
+          `status=${candidate.status} action=${reflection?.suggested_action ?? 'missing_report'} ` +
+          `accepted=${candidate.accepted_evidence_refs.length} rejected=${candidate.rejected_evidence_refs.length} ` +
+          `risk=${candidate.risk_flags.join(',') || 'none'} eval=${evaluation?.verdict ?? 'missing_eval'} ` +
+          `rejected_reason=${rejectedReasons.slice(0, 3).join(',') || 'none'}`,
       });
     }
   }

@@ -20,7 +20,11 @@ export const SCHEMA_VERSION = {
   source: 'source.v1',
   project: 'project.v1',
   connectorInstance: 'connectorinstance.v1',
+  backfillCandidate: 'backfillcandidate.v1',
+  reflectionReport: 'reflectionreport.v1',
+  evalReport: 'evalreport.v1',
+  rankingMetadata: 'rankingmetadata.v1',
 } as const;
 
 /** Bump when the encrypted-DB physical table layout changes. */
-export const STORE_FORMAT_VERSION = 1;
+export const STORE_FORMAT_VERSION = 2;

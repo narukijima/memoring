@@ -53,6 +53,10 @@ export const ID_PREFIX = {
   quarantine: 'quar',
   secretScan: 'scan',
   job: 'job',
+  backfillCandidate: 'bfc',
+  reflectionReport: 'rpt',
+  evalReport: 'eval',
+  rankingMetadata: 'rank',
 } as const;
 
 export type EntityKind = keyof typeof ID_PREFIX;

@@ -86,12 +86,21 @@ export interface AbstractResult {
   failed: number;
 }
 
+export interface AbstractOptions {
+  /** When false, return Claim-shaped proposals without inserting them into the
+   *  Claim store. Backfill uses this so Grounded Backfill Candidate is the
+   *  promotion barrier before any normal Claim candidate can consolidate. */
+  persistClaims?: boolean;
+}
+
 export async function abstractEvents(
   ctx: RealmContext,
   provider: MemoryProvider,
   events: MemEvent[],
   now = new Date(),
+  options: AbstractOptions = {},
 ): Promise<AbstractResult> {
+  const persistClaims = options.persistClaims ?? true;
   const newCandidates: Claim[] = [];
   let merged = 0;
   let failed = 0;
@@ -172,7 +181,7 @@ export async function abstractEvents(
       const existingLive =
         existing && existing.status !== 'redacted' && existing.status !== 'rejected' && existing.status !== 'superseded';
 
-      if (existing && existingLive) {
+      if (existing && existingLive && persistClaims) {
         // Auto-merge: union evidence into the existing claim (FR-035).
         if (!existing.evidence_event_identities.includes(event.event_identity)) {
           const updated: Claim = {
@@ -187,7 +196,8 @@ export async function abstractEvents(
         }
         continue;
       }
-      if (existingId && !existingLive) ctx.store.deleteMeta(metaKey);
+      if (existing && existingLive && !persistClaims) continue;
+      if (existingId && !existingLive && persistClaims) ctx.store.deleteMeta(metaKey);
       const supersedes = existing && existing.status === 'superseded' ? [existing.claim_id] : [];
 
       const derivation = recordDerivation(ctx, provider, event, now);
@@ -225,9 +235,11 @@ export async function abstractEvents(
         sensitivity_classification_state: event.sensitivity_classification_state,
         schema_version: SCHEMA_VERSION.claim,
       };
-      ctx.store.putClaim(claim);
-      ctx.store.setMeta(metaKey, claim.claim_id);
-      ctx.chronicler.append('abstract', claim.claim_id, now);
+      if (persistClaims) {
+        ctx.store.putClaim(claim);
+        ctx.store.setMeta(metaKey, claim.claim_id);
+        ctx.chronicler.append('abstract', claim.claim_id, now);
+      }
       newCandidates.push(claim);
     }
   }

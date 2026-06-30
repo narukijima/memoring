@@ -427,7 +427,7 @@ AI / Recipe による派生の来歴。AI 由来 record はこれを `created_by
 {
   "derivation_id": "der_01J...",
   "realm_id": "realm_01J...",
-  "derivation_type": "scope_classify | sensitivity_classify | consolidate | abstract | label_suggest",
+  "derivation_type": "scope_classify | sensitivity_classify | consolidate | abstract | label_suggest | backfill_candidate | shadow_trial",
   "input_event_identities": ["eid:hmac:..."],
   "input_claim_ids": ["clm_..."],
   "model_provider": "local | <provider>",
@@ -445,6 +445,14 @@ AI / Recipe による派生の来歴。AI 由来 record はこれを `created_by
 ```
 
 Derivation は監査と再現のための来歴であり、それ自体は evidence ではない。同じ入力に対する出力差は eval で比較し、Core schema は変えない。Recipe 変更時の既定は no auto-retroactive で、既存 record への適用は明示 reprocess による（§9.4 / 第10章）。legacy record は `derivation_id=legacy` の placeholder Derivation に紐づける。
+
+### 1.11.1 Reflection Lane / BackfillCandidate / 診断 report
+
+Reflection Lane は Derivation-only のレーンである。過去の Event / Claim を分析してよいが、その出力は生成された分析 metadata であり、Claim truth でも evidence でもない。Reflection output は `Claim.evidence_event_identities` に入れてはならず、independent evidence count を増やしてはならず、Claim を直接 consolidate してはならない。
+
+BackfillCandidate は historical logs から作られる grounded candidate record である。backfill 経路では abstraction output はまず BackfillCandidate にならなければならず、通常の Claim `candidate` は BackfillCandidate が grounded-only promotion barrier を通過した後にだけ作る。各 BackfillCandidate は `source_event_identities`、accepted evidence refs、rejected evidence refs と rejection reason、risk flags（`stale / cross_scope / weak_origin / conflict / sensitivity_unknown / self_generated`）、`created_by_derivation_id`、validator threshold に必要な authority / confidence、`candidate / quarantined / rejected / promoted` の status を持つ。valid な Event identity または accepted evidence reference を持たない BackfillCandidate は quarantine または reject する。BackfillCandidate からの promotion は通常の Claim `candidate` を作るだけであり、consolidate するかは既存 validator が判定する。
+
+ReflectionReport は `candidate_id`、surfaced reason、accepted evidence refs、rejected evidence refs と rejection reason、risk flags、suggested action（`keep_candidate / defer / reject`）を出す。EvalReport は baseline と candidate-augmented context / output を比較し、verdict `helpful / neutral / harmful`、reason、risk flags、evidence refs を持つ。ReflectionReport と EvalReport は health などの local diagnostics から、id / count / action / risk / verdict に限定して確認できる。candidate statement text はそこで表示しない。ReflectionReport と EvalReport は診断 artifact であり、evidence ではなく、sensitivity / scope の confirmed、Declassify、Claim の直接 promotion / consolidation を行わない。
 
 ### 1.12 SealRule
 
@@ -797,6 +805,8 @@ AI の confidence と tunable Recipe は safety を緩めない。policy と val
 ### 3.6 ranking（§13.3、Gate の後）
 
 ranking は Gate を通った item にのみ適用する品質調整である。ranking 係数・floor は Recipe が所有する tunable であり、第10章に示す。安全 floor は安全側にしか変更できない。score 式と floor / ceiling の初期値は §10.3 を参照。
+
+Ranking metadata は `recall_count`、`distinct_query_count`、`distinct_day_count`、`correction_count`、`conflict_count`、`stale_signal` を持ってよい。これらの signal は `gate(x, r)` が true になった後の ordering にだけ影響する。`¬gate(x, r)` のとき、その item はその request で ranking score も rankable metadata も持たない。helpful な EvalReport や ReflectionReport は、この Gate-after-ranking 経路を通じて review priority または ranking metadata にだけ影響してよい。evidence、confirmed、Declassify、consolidation は作らない。
 
 ---
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildHealthReport } from '@retrieval/health';
 import { newId } from '@core/schema/ids';
+import { createBackfillCandidate, createShadowTrialReport } from '@claim/reflection';
 import { renderHealthReport } from '../apps/cli/commands/health';
 import { seedRealmFromFixture, type SeededRealm } from './seed';
 
@@ -132,5 +133,34 @@ describe('memoring health — read-only advisory diagnostics', () => {
     expect(issueMessages).toContain('sensitivity=secret');
     expect(issueMessages).toContain('sensitivity=confidential');
     expect(issueMessages).toContain('sensitivity=unknown');
+  });
+
+  it('surfaces Reflection diagnostics without printing candidate statement text', () => {
+    const ctx = seeded.realm.ctx;
+    const event = ctx.store.listEvents(ctx.realmId)[0]!;
+    const sentinel = 'REFLECTION_HEALTH_SHOULD_NOT_LEAK_12345';
+    const { candidate } = createBackfillCandidate(ctx, {
+      kind: 'fact',
+      statement: sentinel,
+      eventIdentities: [event.event_identity, 'evt_missing_health_reflection'],
+      surfacedReason: 'health diagnostic test',
+    });
+    createShadowTrialReport(ctx, {
+      candidateId: candidate.backfill_candidate_id,
+      baselineDigest: 'baseline',
+      augmentedDigest: 'augmented',
+      verdict: 'neutral',
+      reason: 'diagnostic only',
+    });
+
+    const report = buildHealthReport(ctx);
+    const rendered = renderHealthReport(report).join('\n');
+
+    expect(report.reflectionDiagnostics.some((i) => i.id === candidate.backfill_candidate_id)).toBe(true);
+    expect(rendered).toMatch(/Reflection diagnostics: [1-9]/);
+    expect(rendered).toContain(`- ${candidate.backfill_candidate_id}:`);
+    expect(rendered).toContain('rejected=1');
+    expect(rendered).toContain('eval=neutral');
+    expect(rendered).not.toContain(sentinel);
   });
 });

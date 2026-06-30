@@ -58,6 +58,30 @@ CREATE TABLE IF NOT EXISTS derivation (
   derivation_id TEXT PRIMARY KEY, realm_id TEXT NOT NULL, doc TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS backfill_candidate (
+  backfill_candidate_id TEXT PRIMARY KEY, realm_id TEXT NOT NULL,
+  status TEXT NOT NULL, doc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_backfill_candidate_status ON backfill_candidate(realm_id, status);
+
+CREATE TABLE IF NOT EXISTS reflection_report (
+  reflection_report_id TEXT PRIMARY KEY, realm_id TEXT NOT NULL,
+  candidate_id TEXT NOT NULL, doc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reflection_report_candidate ON reflection_report(realm_id, candidate_id);
+
+CREATE TABLE IF NOT EXISTS eval_report (
+  eval_report_id TEXT PRIMARY KEY, realm_id TEXT NOT NULL,
+  candidate_id TEXT NOT NULL, verdict TEXT NOT NULL, doc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_eval_report_candidate ON eval_report(realm_id, candidate_id);
+
+CREATE TABLE IF NOT EXISTS ranking_metadata (
+  ranking_metadata_id TEXT PRIMARY KEY, realm_id TEXT NOT NULL,
+  target_type TEXT NOT NULL, target_id TEXT NOT NULL, doc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ranking_metadata_target ON ranking_metadata(realm_id, target_type, target_id);
+
 CREATE TABLE IF NOT EXISTS context_pack (
   context_pack_id TEXT PRIMARY KEY, realm_id TEXT NOT NULL, doc TEXT NOT NULL
 );

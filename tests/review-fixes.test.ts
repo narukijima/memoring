@@ -2,7 +2,7 @@
 // specific bug the review found so it cannot silently regress.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '@core/schema/ids';
-import { SCHEMA_VERSION } from '@core/schema/versions';
+import { SCHEMA_VERSION, STORE_FORMAT_VERSION } from '@core/schema/versions';
 import { eventIdentity, sessionIdentity, sourceIdentity } from '@intake/identity';
 import { abstractEvents } from '@claim/extractor';
 import { runSecretScan } from '@security/secret-scan';
@@ -299,6 +299,25 @@ describe('F10 — a vault written by a newer format is refused', () => {
       realm.ctx.flush();
       realm.ctx.close(true);
       expect(() => openRealmLocal(root)).toThrow(/newer/i);
+    } finally {
+      realm.cleanup();
+    }
+  });
+
+  it('records the current store_format_version after an idempotent schema upgrade', () => {
+    const realm = makeTempRealm();
+    const root = realm.root;
+    try {
+      realm.ctx.store.setMeta('store_format_version', '1');
+      realm.ctx.flush();
+      realm.ctx.close(true);
+
+      const reopened = openRealmLocal(root);
+      try {
+        expect(reopened.store.getMeta('store_format_version')).toBe(String(STORE_FORMAT_VERSION));
+      } finally {
+        reopened.close(true);
+      }
     } finally {
       realm.cleanup();
     }

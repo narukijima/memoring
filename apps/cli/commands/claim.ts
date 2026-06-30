@@ -8,6 +8,7 @@ import { newId } from '@core/schema/ids';
 import { reinforcement } from '@claim/lifecycle';
 import { claimKeyMeta, readClaimStatement } from '@claim/extractor';
 import { indexClaim } from '@retrieval/search';
+import { incrementCorrectionCount } from '@retrieval/ranking-signals';
 import { scanText } from '@security/secret-scan';
 import { getPassphrase } from '../prompt';
 import { parseFlags } from '../args';
@@ -85,6 +86,7 @@ function correct(ctx: RealmContext, id?: string, text?: string): number {
   if (!id || !text) return usage();
   const c = ctx.store.getClaim(id);
   if (!c) return notFound(id);
+  incrementCorrectionCount(ctx, c.claim_id);
   const oldStatement = readClaimStatement(ctx, c);
   const ref = ctx.objects.put(`${c.claim_id}_stmt_corr`, Buffer.from(text, 'utf8')).ref;
   const secretDetected = scanText(text).detected;
